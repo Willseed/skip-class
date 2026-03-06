@@ -277,7 +277,7 @@
       </fieldset>
 
       {#if validationErrors.length > 0}
-        <div class="message error">
+        <div class="message error validation-error">
           <p>請先修正以下問題：</p>
           <ul>
             {#each validationErrors as errorItem, errorIndex (errorIndex)}
@@ -430,9 +430,24 @@
     border: 1px solid #fca5a5;
   }
 
+  .validation-error {
+    color: #b91c1c;
+    animation: fadeInOut 1.6s ease-in-out infinite;
+  }
+
   .error ul {
     margin: 0.5rem 0 0;
     padding-left: 1.1rem;
+  }
+
+  @keyframes fadeInOut {
+    0%,
+    100% {
+      opacity: 0.6;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 
   pre {
