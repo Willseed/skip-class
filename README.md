@@ -56,11 +56,12 @@ npm run test:e2e
 
 `.github/workflows/ci.yml` 會在 push（`main`/`master`）與 pull request 時執行：
 
-1. `bun install --frozen-lockfile`
-2. `bun run lint`
-3. `bun run build`
-4. `bunx playwright install --with-deps chromium`
-5. `bun run test:e2e`
+1. `actionlint`（驗證 `.github/workflows/*.yml`）
+2. `bun install --frozen-lockfile`
+3. `bun run lint`
+4. `bun run build`
+5. `bunx playwright install --with-deps chromium`
+6. `bun run test:e2e`
 
 ## GitHub Pages Deployment Behavior
 
@@ -69,3 +70,4 @@ npm run test:e2e
 - 透過 `actions/configure-pages` 取得 Pages `base_path`
 - 以 `bun run build -- --base "${BASE_PATH%/}/"` 建置，確保 repo 子路徑與根路徑都能正確載入資源
 - 上傳 `dist/` 後使用 `actions/deploy-pages` 發佈
+- 若 VS Code GitHub Actions schema 對 `environment.name: github-pages` 顯示警告，這通常是 false-positive；實際合法性由 CI 的 `actionlint` 進行驗證

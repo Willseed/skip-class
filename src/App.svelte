@@ -1,5 +1,43 @@
-<script>
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://redacted.invalid/learning-center'
+<script lang="ts">
+  type PreviewNumber = number | '(未填寫)' | '(格式錯誤)'
+
+  type FormValues = {
+    classId: string
+    activityId: string
+    authToken: string
+    lastViewTime: string
+    playedStart: string
+    playedEnd: string
+    learningTime: string
+  }
+
+  type EndpointValues = Pick<FormValues, 'classId' | 'activityId'>
+
+  type WatchPayload = {
+    last_view_time: number
+    played: [[number, number]]
+    learning_time: number
+  }
+
+  type RequestPreview = {
+    method: 'POST'
+    url: string
+    headers: {
+      Accept: string
+      'Content-Type': string
+      Authorization: string
+    }
+    body: {
+      last_view_time: PreviewNumber
+      played: [[PreviewNumber, PreviewNumber]]
+      learning_time: PreviewNumber
+    }
+  }
+
+  const API_BASE_URL =
+    typeof import.meta.env.VITE_API_BASE_URL === 'string'
+      ? import.meta.env.VITE_API_BASE_URL
+      : 'https://redacted.invalid/learning-center'
 
   let classId = ''
   let activityId = ''
@@ -9,14 +47,18 @@
   let playedEnd = ''
   let learningTime = ''
 
-  let validationErrors = []
+  let validationErrors: string[] = []
   let requestError = ''
   let requestSuccess = ''
-  let responseStatus = null
+  let responseStatus: number | null = null
   let responseBody = ''
   let isSubmitting = false
 
-  const toPreviewNumber = (value) => {
+  let requestPreview: RequestPreview
+  let requestPreviewText: string
+  let sandboxPreviewDoc: string
+
+  const toPreviewNumber = (value: string): PreviewNumber => {
     if (value === '') {
       return '(未填寫)'
     }
@@ -24,7 +66,7 @@
     return Number.isFinite(parsedValue) ? parsedValue : '(格式錯誤)'
   }
 
-  const escapeHtml = (value) =>
+  const escapeHtml = (value: string): string =>
     value
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
@@ -32,7 +74,7 @@
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;')
 
-  const maskToken = (token) => {
+  const maskToken = (token: string): string => {
     const trimmedToken = token.trim()
     if (!trimmedToken) {
       return '(未輸入)'
@@ -43,7 +85,7 @@
     return `${trimmedToken.slice(0, 6)}...${trimmedToken.slice(-4)}`
   }
 
-  const buildEndpointUrl = (values, withPlaceholders = false) => {
+  const buildEndpointUrl = (values: EndpointValues, withPlaceholders = false): string => {
     const coursePath = values.classId.trim()
       ? encodeURIComponent(values.classId.trim())
       : withPlaceholders
@@ -57,13 +99,13 @@
     return `${API_BASE_URL}/class/${coursePath}/learning-activity/${activityPath}/watch`
   }
 
-  const buildPayload = (values) => ({
+  const buildPayload = (values: FormValues): WatchPayload => ({
     last_view_time: Number(values.lastViewTime),
     played: [[Number(values.playedStart), Number(values.playedEnd)]],
     learning_time: Number(values.learningTime),
   })
 
-  const createPreviewDocument = (previewText) => `<!doctype html>
+  const createPreviewDocument = (previewText: string): string => `<!doctype html>
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
@@ -80,8 +122,8 @@
   </body>
 </html>`
 
-  const validateForm = (values) => {
-    const errors = []
+  const validateForm = (values: FormValues): string[] => {
+    const errors: string[] = []
     if (!values.classId.trim()) {
       errors.push('請輸入課程 ID（class）。')
     }
@@ -92,7 +134,7 @@
       errors.push('請輸入授權 Token。')
     }
 
-    const numberFields = [
+    const numberFields: [string, string][] = [
       ['last_view_time', values.lastViewTime],
       ['played 起始時間', values.playedStart],
       ['played 結束時間', values.playedEnd],
@@ -140,8 +182,8 @@
   $: requestPreviewText = JSON.stringify(requestPreview, null, 2)
   $: sandboxPreviewDoc = createPreviewDocument(requestPreviewText)
 
-  const submitRequest = async () => {
-    const values = { classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime }
+  const submitRequest = async (): Promise<void> => {
+    const values: FormValues = { classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime }
     validationErrors = validateForm(values)
     requestError = ''
     requestSuccess = ''
@@ -168,11 +210,11 @@
       responseBody = await response.text()
 
       if (response.ok) {
-        requestSuccess = '送出成功，伺服器已接收 watch 資料。'
+       requestSuccess = '送出成功，伺服器已接收 watch 資料。'
       } else {
         requestError = `送出失敗（HTTP ${response.status}）。請確認 Token 和輸入值。`
       }
-    } catch (error) {
+    } catch (error: unknown) {
       requestError = `送出失敗：${error instanceof Error ? error.message : '未知錯誤'}`
     } finally {
       isSubmitting = false

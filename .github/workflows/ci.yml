@@ -12,6 +12,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate GitHub Actions workflows
+        uses: rhysd/actionlint@v1
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
