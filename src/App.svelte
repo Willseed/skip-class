@@ -10,6 +10,11 @@
   }
 
   type EndpointValues = Pick<FormValues, 'classId' | 'activityId'>
+  type FieldErrors = Partial<Record<keyof FormValues, string>>
+  type ValidationResult = {
+    errors: string[]
+    fieldErrors: FieldErrors
+  }
 
   type WatchPayload = {
     last_view_time: number
@@ -36,13 +41,7 @@
   let learningTime = ''
 
   let validationErrors: string[] = []
-let classIdError = false
-let activityIdError = false
-let authTokenError = false
-let lastViewTimeError = false
-let playedStartError = false
-let playedEndError = false
-let learningTimeError = false
+  let fieldErrors: FieldErrors = {}
   let requestError = ''
   let requestSuccess = ''
   let responseStatus: number | null = null
@@ -117,33 +116,50 @@ let learningTimeError = false
   </body>
 </html>`
 
-  const validateForm = (values: FormValues): string[] => {
+  const validateForm = (values: FormValues): ValidationResult => {
     const errors: string[] = []
+    const nextFieldErrors: FieldErrors = {}
+    const setFieldError = (field: keyof FormValues, message: string): void => {
+      if (!nextFieldErrors[field]) {
+        nextFieldErrors[field] = message
+      }
+    }
+
     if (!values.classId.trim()) {
-      errors.push('請輸入課程ID(class)。')
+      const message = '請輸入課程ID(class)。'
+      errors.push(message)
+      setFieldError('classId', message)
     }
     if (!values.activityId.trim()) {
-      errors.push('請輸入活動ID(learning-activity)。')
+      const message = '請輸入活動ID(learning-activity)。'
+      errors.push(message)
+      setFieldError('activityId', message)
     }
     if (!values.authToken.trim()) {
-      errors.push('請輸入授權 Token。')
+      const message = '請輸入授權 Token。'
+      errors.push(message)
+      setFieldError('authToken', message)
     }
 
-    const numberFields: [string, string][] = [
-      ['最後觀看時間(last_view_time)', values.lastViewTime],
-      ['播放起始時間(played_start)', values.playedStart],
-      ['播放結束時間(played_end)', values.playedEnd],
-      ['學習時間(learning_time)', values.learningTime],
+    const numberFields: [keyof FormValues, string, string][] = [
+      ['lastViewTime', '最後觀看時間(last_view_time)', values.lastViewTime],
+      ['playedStart', '播放起始時間(played_start)', values.playedStart],
+      ['playedEnd', '播放結束時間(played_end)', values.playedEnd],
+      ['learningTime', '學習時間(learning_time)', values.learningTime],
     ]
 
-    for (const [label, rawValue] of numberFields) {
+    for (const [field, label, rawValue] of numberFields) {
       if (rawValue === '') {
-        errors.push(`請輸入 ${label}。`)
+        const message = `請輸入 ${label}。`
+        errors.push(message)
+        setFieldError(field, message)
         continue
       }
       const parsedValue = Number(rawValue)
       if (!Number.isInteger(parsedValue) || parsedValue < 0) {
-        errors.push(`${label} 需為 0 以上整數。`)
+        const message = `${label} 需為 0 以上整數。`
+        errors.push(message)
+        setFieldError(field, message)
       }
     }
 
@@ -151,13 +167,17 @@ let learningTimeError = false
     const end = Number(values.playedEnd)
     const viewTime = Number(values.lastViewTime)
     if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
-      errors.push('播放結束時間(played_end)不可小於播放起始時間(played_start)。')
+      const message = '播放結束時間(played_end)不可小於播放起始時間(played_start)。'
+      errors.push(message)
+      setFieldError('playedEnd', message)
     }
     if (Number.isFinite(viewTime) && Number.isFinite(end) && viewTime < end) {
-      errors.push('最後觀看時間(last_view_time)需大於或等於播放結束時間(played_end)。')
+      const message = '最後觀看時間(last_view_time)需大於或等於播放結束時間(played_end)。'
+      errors.push(message)
+      setFieldError('lastViewTime', message)
     }
 
-    return errors
+    return { errors, fieldErrors: nextFieldErrors }
   }
 
   $: if (ENABLE_PREVIEW_PANES) {
@@ -185,37 +205,9 @@ let learningTimeError = false
 
   const submitRequest = async (): Promise<void> => {
     const values: FormValues = { classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime }
-    validationErrors = validateForm(values)
-
-    // Reset all error flags
-    classIdError = false
-    activityIdError = false
-    authTokenError = false
-    lastViewTimeError = false
-    playedStartError = false
-    playedEndError = false
-    learningTimeError = false
-
-    // Per-field error detection
-    if (!values.classId.trim()) classIdError = true
-    if (!values.activityId.trim()) activityIdError = true
-    if (!values.authToken.trim()) authTokenError = true
-    if (values.lastViewTime === '' || !Number.isInteger(Number(values.lastViewTime)) || Number(values.lastViewTime) < 0) lastViewTimeError = true
-    if (values.playedStart === '' || !Number.isInteger(Number(values.playedStart)) || Number(values.playedStart) < 0) playedStartError = true
-    if (values.playedEnd === '' || !Number.isInteger(Number(values.playedEnd)) || Number(values.playedEnd) < 0) playedEndError = true
-    if (values.learningTime === '' || !Number.isInteger(Number(values.learningTime)) || Number(values.learningTime) < 0) learningTimeError = true
-
-    // Special logic for playedEnd < playedStart
-    const start = Number(values.playedStart)
-    const end = Number(values.playedEnd)
-    if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
-      playedEndError = true
-    }
-    // Special logic for lastViewTime < playedEnd
-    const viewTime = Number(values.lastViewTime)
-    if (Number.isFinite(viewTime) && Number.isFinite(end) && viewTime < end) {
-      lastViewTimeError = true
-    }
+    const { errors, fieldErrors: nextFieldErrors } = validateForm(values)
+    validationErrors = errors
+    fieldErrors = nextFieldErrors
 
     requestError = ''
     requestSuccess = ''
@@ -275,11 +267,17 @@ let learningTimeError = false
         <div class="grid-fields">
           <label>
             課程ID(class)
-            <input bind:value={classId} placeholder="例如 594" autocomplete="off" class={classIdError ? 'input-error' : ''} style={classIdError ? 'animation: fadeInOut 1.6s ease-in-out infinite;' : ''} />
+            <input bind:value={classId} placeholder="例如 594" autocomplete="off" class={fieldErrors.classId ? 'input-error' : ''} />
+            {#if fieldErrors.classId}
+              <span class="field-error">{fieldErrors.classId}</span>
+            {/if}
           </label>
           <label>
             活動ID(learning-activity)
-            <input bind:value={activityId} placeholder="例如 2241" autocomplete="off" class={activityIdError ? 'input-error' : ''} style={activityIdError ? 'animation: fadeInOut 1.6s ease-in-out infinite;' : ''} />
+            <input bind:value={activityId} placeholder="例如 2241" autocomplete="off" class={fieldErrors.activityId ? 'input-error' : ''} />
+            {#if fieldErrors.activityId}
+              <span class="field-error">{fieldErrors.activityId}</span>
+            {/if}
           </label>
         </div>
       </fieldset>
@@ -288,7 +286,10 @@ let learningTimeError = false
         <legend>2. 授權</legend>
         <label>
           Bearer Token（請貼上完整 Token）
-          <input type="password" bind:value={authToken} placeholder="貼上使用者自己的 Token" autocomplete="off" class={authTokenError ? 'input-error' : ''} style={authTokenError ? 'animation: fadeInOut 1.6s ease-in-out infinite;' : ''} />
+          <input type="password" bind:value={authToken} placeholder="貼上使用者自己的 Token" autocomplete="off" class={fieldErrors.authToken ? 'input-error' : ''} />
+          {#if fieldErrors.authToken}
+            <span class="field-error">{fieldErrors.authToken}</span>
+          {/if}
         </label>
       </fieldset>
 
@@ -297,33 +298,34 @@ let learningTimeError = false
         <div class="grid-fields">
           <label>
             最後觀看時間(last_view_time)
-            <input type="number" min="0" step="1" bind:value={lastViewTime} placeholder="例如 3130" class={lastViewTimeError ? 'input-error' : ''} />
+            <input type="number" min="0" step="1" bind:value={lastViewTime} placeholder="例如 3130" class={fieldErrors.lastViewTime ? 'input-error' : ''} />
+            {#if fieldErrors.lastViewTime}
+              <span class="field-error">{fieldErrors.lastViewTime}</span>
+            {/if}
           </label>
           <label>
             播放起始時間(played_start)
-            <input type="number" min="0" step="1" bind:value={playedStart} placeholder="例如 3100" class={playedStartError ? 'input-error' : ''} />
+            <input type="number" min="0" step="1" bind:value={playedStart} placeholder="例如 3100" class={fieldErrors.playedStart ? 'input-error' : ''} />
+            {#if fieldErrors.playedStart}
+              <span class="field-error">{fieldErrors.playedStart}</span>
+            {/if}
           </label>
           <label>
             播放結束時間(played_end)
-            <input type="number" min="0" step="1" bind:value={playedEnd} placeholder="例如 3130" class={playedEndError ? 'input-error' : ''} />
+            <input type="number" min="0" step="1" bind:value={playedEnd} placeholder="例如 3130" class={fieldErrors.playedEnd ? 'input-error' : ''} />
+            {#if fieldErrors.playedEnd}
+              <span class="field-error">{fieldErrors.playedEnd}</span>
+            {/if}
           </label>
           <label>
             學習時間(learning_time)
-            <input type="number" min="0" step="1" bind:value={learningTime} placeholder="例如 30" class={learningTimeError ? 'input-error' : ''} />
+            <input type="number" min="0" step="1" bind:value={learningTime} placeholder="例如 30" class={fieldErrors.learningTime ? 'input-error' : ''} />
+            {#if fieldErrors.learningTime}
+              <span class="field-error">{fieldErrors.learningTime}</span>
+            {/if}
           </label>
         </div>
       </fieldset>
-
-      {#if validationErrors.length > 0}
-        <div class="message error validation-error">
-          <p>請先修正以下問題：</p>
-          <ul>
-            {#each validationErrors as errorItem, errorIndex (errorIndex)}
-              <li>{errorItem}</li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
 
       {#if requestSuccess}
         <div class="message success">{requestSuccess}</div>
@@ -425,8 +427,15 @@ let learningTimeError = false
 
   .input-error {
     border: 1.5px solid #f87171;
-    animation: fadeInOut 1.6s ease-in-out infinite;
+    animation: fadeInOut 1.6s ease-in-out 1;
     background: #fef2f2;
+  }
+
+  .field-error {
+    color: #b91c1c;
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.35;
   }
 
   input:focus {
@@ -472,16 +481,6 @@ let learningTimeError = false
   .error {
     background: #fee2e2;
     border: 1px solid #fca5a5;
-  }
-
-  .validation-error {
-    color: #b91c1c;
-    animation: fadeInOut 1.6s ease-in-out infinite;
-  }
-
-  .error ul {
-    margin: 0.5rem 0 0;
-    padding-left: 1.1rem;
   }
 
   @keyframes fadeInOut {
