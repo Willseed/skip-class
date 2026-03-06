@@ -5,7 +5,7 @@ test('shows the watch api tool heading', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Watch API 填寫工具' })).toBeVisible()
 })
 
-test('shows inline field errors and no global validation summary for failed submit', async ({ page }) => {
+test('shows inline field errors, clears corrected field errors immediately, and no global validation summary', async ({ page }) => {
   await page.goto('/')
 
   const classIdInput = page.getByPlaceholder('例如 594')
@@ -32,6 +32,21 @@ test('shows inline field errors and no global validation summary for failed subm
   await expect(classIdField.getByText('請輸入課程ID(class)。')).toBeVisible()
   await expect(activityIdField.getByText('請輸入活動ID(learning-activity)。')).toBeVisible()
   await expect(authTokenField.getByText('請輸入授權 Token。')).toBeVisible()
+
+  await classIdInput.fill('594')
+  await expect(classIdInput).not.toHaveClass(/input-error/)
+  await expect(classIdField.getByText('請輸入課程ID(class)。')).toHaveCount(0)
+  await expect(activityIdInput).toHaveClass(/input-error/)
+  await expect(authTokenInput).toHaveClass(/input-error/)
+
+  await activityIdInput.fill('2241')
+  await expect(activityIdInput).not.toHaveClass(/input-error/)
+  await expect(activityIdField.getByText('請輸入活動ID(learning-activity)。')).toHaveCount(0)
+  await expect(authTokenInput).toHaveClass(/input-error/)
+
+  await authTokenInput.fill('test-token-value')
+  await expect(authTokenInput).not.toHaveClass(/input-error/)
+  await expect(authTokenField.getByText('請輸入授權 Token。')).toHaveCount(0)
 })
 
 test('runs input-error animation once instead of infinitely for invalid fields', async ({ page }) => {

@@ -42,6 +42,7 @@
 
   let validationErrors: string[] = []
   let fieldErrors: FieldErrors = {}
+  let hasFailedValidationAttempt = false
   let requestError = ''
   let requestSuccess = ''
   let responseStatus: number | null = null
@@ -180,6 +181,13 @@
     return { errors, fieldErrors: nextFieldErrors }
   }
 
+  const applyValidation = (values: FormValues): ValidationResult => {
+    const result = validateForm(values)
+    validationErrors = result.errors
+    fieldErrors = result.fieldErrors
+    return result
+  }
+
   $: if (ENABLE_PREVIEW_PANES) {
     const requestPreview = {
       method: 'POST',
@@ -203,11 +211,14 @@
     sandboxPreviewDoc = ''
   }
 
+  $: if (hasFailedValidationAttempt) {
+    applyValidation({ classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime })
+  }
+
   const submitRequest = async (): Promise<void> => {
     const values: FormValues = { classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime }
-    const { errors, fieldErrors: nextFieldErrors } = validateForm(values)
-    validationErrors = errors
-    fieldErrors = nextFieldErrors
+    const { errors } = applyValidation(values)
+    hasFailedValidationAttempt = errors.length > 0
 
     requestError = ''
     requestSuccess = ''
