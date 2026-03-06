@@ -37,9 +37,9 @@ npm run dev
 
 ## 給非技術使用者的操作方式
 
-1. 在 **API 路徑** 填入課程 ID（`class`）與活動 ID（`learning-activity`）。
+1. 在 **API 路徑** 填入課程ID(`class`)與活動ID(`learning-activity`)。
 2. 在 **授權** 貼上你自己的 Bearer Token（系統不會預填）。
-3. 在 **Payload** 填入 `last_view_time`、`played` 起訖、`learning_time`（皆為 0 以上整數）。
+3. 在 **Payload內容** 填入最後觀看時間(last_view_time)、播放起始時間(played_start)、播放結束時間(played_end)、學習時間(learning_time)（皆為 0 以上整數）。
 4. 按 **送出 watch request**，查看成功/錯誤訊息與伺服器回應。
 
 ## Security Notes

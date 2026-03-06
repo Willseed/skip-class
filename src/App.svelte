@@ -113,20 +113,20 @@
   const validateForm = (values: FormValues): string[] => {
     const errors: string[] = []
     if (!values.classId.trim()) {
-      errors.push('請輸入課程 ID（class）。')
+      errors.push('請輸入課程ID(class)。')
     }
     if (!values.activityId.trim()) {
-      errors.push('請輸入活動 ID（learning-activity）。')
+      errors.push('請輸入活動ID(learning-activity)。')
     }
     if (!values.authToken.trim()) {
       errors.push('請輸入授權 Token。')
     }
 
     const numberFields: [string, string][] = [
-      ['last_view_time', values.lastViewTime],
-      ['played 起始時間', values.playedStart],
-      ['played 結束時間', values.playedEnd],
-      ['learning_time', values.learningTime],
+      ['最後觀看時間(last_view_time)', values.lastViewTime],
+      ['播放起始時間(played_start)', values.playedStart],
+      ['播放結束時間(played_end)', values.playedEnd],
+      ['學習時間(learning_time)', values.learningTime],
     ]
 
     for (const [label, rawValue] of numberFields) {
@@ -144,10 +144,10 @@
     const end = Number(values.playedEnd)
     const viewTime = Number(values.lastViewTime)
     if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
-      errors.push('played 結束時間不可小於起始時間。')
+      errors.push('播放結束時間(played_end)不可小於播放起始時間(played_start)。')
     }
     if (Number.isFinite(viewTime) && Number.isFinite(end) && viewTime < end) {
-      errors.push('last_view_time 需大於或等於 played 結束時間。')
+      errors.push('最後觀看時間(last_view_time)需大於或等於播放結束時間(played_end)。')
     }
 
     return errors
@@ -236,11 +236,11 @@
         <legend>1. API 路徑</legend>
         <div class="grid-fields">
           <label>
-            課程 ID（class）
+            課程ID(class)
             <input bind:value={classId} placeholder="例如 594" autocomplete="off" />
           </label>
           <label>
-            活動 ID（learning-activity）
+            活動ID(learning-activity)
             <input bind:value={activityId} placeholder="例如 2241" autocomplete="off" />
           </label>
         </div>
@@ -255,22 +255,22 @@
       </fieldset>
 
       <fieldset>
-        <legend>3. Payload 內容</legend>
+        <legend>3. Payload內容</legend>
         <div class="grid-fields">
           <label>
-            last_view_time
+            最後觀看時間(last_view_time)
             <input type="number" min="0" step="1" bind:value={lastViewTime} placeholder="例如 3130" />
           </label>
           <label>
-            played 起始時間
+            播放起始時間(played_start)
             <input type="number" min="0" step="1" bind:value={playedStart} placeholder="例如 3100" />
           </label>
           <label>
-            played 結束時間
+            播放結束時間(played_end)
             <input type="number" min="0" step="1" bind:value={playedEnd} placeholder="例如 3130" />
           </label>
           <label>
-            learning_time
+            學習時間(learning_time)
             <input type="number" min="0" step="1" bind:value={learningTime} placeholder="例如 30" />
           </label>
         </div>
