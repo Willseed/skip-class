@@ -1,6 +1,4 @@
 <script lang="ts">
-  type PreviewNumber = number | '(未填寫)' | '(格式錯誤)'
-
   type FormValues = {
     classId: string
     activityId: string
@@ -19,25 +17,15 @@
     learning_time: number
   }
 
-  type RequestPreview = {
-    method: 'POST'
-    url: string
-    headers: {
-      Accept: string
-      'Content-Type': string
-      Authorization: string
-    }
-    body: {
-      last_view_time: PreviewNumber
-      played: [[PreviewNumber, PreviewNumber]]
-      learning_time: PreviewNumber
-    }
-  }
+  type PreviewNumber = number | '(未填寫)' | '(格式錯誤)'
 
   const API_BASE_URL =
     typeof import.meta.env.VITE_API_BASE_URL === 'string'
-      ? import.meta.env.VITE_API_BASE_URL
-      : 'https://redacted.invalid/learning-center'
+      ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
+      : ''
+  const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true'
+  const API_BASE_URL_ERROR =
+    '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path'
 
   let classId = ''
   let activityId = ''
@@ -53,15 +41,35 @@
   let responseStatus: number | null = null
   let responseBody = ''
   let isSubmitting = false
-
-  let requestPreview: RequestPreview
   let requestPreviewText: string
   let sandboxPreviewDoc: string
+
+  const buildEndpointUrl = (values: EndpointValues, withPlaceholders = false): string => {
+    const classIdPath = values.classId.trim()
+      ? encodeURIComponent(values.classId.trim())
+      : withPlaceholders
+        ? '{classId}'
+        : ''
+    const activityIdPath = values.activityId.trim()
+      ? encodeURIComponent(values.activityId.trim())
+      : withPlaceholders
+        ? '{activityId}'
+        : ''
+
+    return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/watch`
+  }
+
+  const buildPayload = (values: FormValues): WatchPayload => ({
+    last_view_time: Number(values.lastViewTime),
+    played: [[Number(values.playedStart), Number(values.playedEnd)]],
+    learning_time: Number(values.learningTime),
+  })
 
   const toPreviewNumber = (value: string): PreviewNumber => {
     if (value === '') {
       return '(未填寫)'
     }
+
     const parsedValue = Number(value)
     return Number.isFinite(parsedValue) ? parsedValue : '(格式錯誤)'
   }
@@ -84,26 +92,6 @@
     }
     return `${trimmedToken.slice(0, 6)}...${trimmedToken.slice(-4)}`
   }
-
-  const buildEndpointUrl = (values: EndpointValues, withPlaceholders = false): string => {
-    const coursePath = values.classId.trim()
-      ? encodeURIComponent(values.classId.trim())
-      : withPlaceholders
-        ? '{classId}'
-        : ''
-    const activityPath = values.activityId.trim()
-      ? encodeURIComponent(values.activityId.trim())
-      : withPlaceholders
-        ? '{activityId}'
-        : ''
-    return `${API_BASE_URL}/class/${coursePath}/learning-activity/${activityPath}/watch`
-  }
-
-  const buildPayload = (values: FormValues): WatchPayload => ({
-    last_view_time: Number(values.lastViewTime),
-    played: [[Number(values.playedStart), Number(values.playedEnd)]],
-    learning_time: Number(values.learningTime),
-  })
 
   const createPreviewDocument = (previewText: string): string => `<!doctype html>
 <html lang="zh-Hant">
@@ -165,22 +153,28 @@
     return errors
   }
 
-  $: requestPreview = {
-    method: 'POST',
-    url: buildEndpointUrl({ classId, activityId }, true),
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${maskToken(authToken)}`,
-    },
-    body: {
-      last_view_time: toPreviewNumber(lastViewTime),
-      played: [[toPreviewNumber(playedStart), toPreviewNumber(playedEnd)]],
-      learning_time: toPreviewNumber(learningTime),
-    },
+  $: if (ENABLE_PREVIEW_PANES) {
+    const requestPreview = {
+      method: 'POST',
+      url: buildEndpointUrl({ classId, activityId }, true),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${maskToken(authToken)}`,
+      },
+      body: {
+        last_view_time: toPreviewNumber(lastViewTime),
+        played: [[toPreviewNumber(playedStart), toPreviewNumber(playedEnd)]],
+        learning_time: toPreviewNumber(learningTime),
+      },
+    }
+
+    requestPreviewText = JSON.stringify(requestPreview, null, 2)
+    sandboxPreviewDoc = createPreviewDocument(requestPreviewText)
+  } else {
+    requestPreviewText = ''
+    sandboxPreviewDoc = ''
   }
-  $: requestPreviewText = JSON.stringify(requestPreview, null, 2)
-  $: sandboxPreviewDoc = createPreviewDocument(requestPreviewText)
 
   const submitRequest = async (): Promise<void> => {
     const values: FormValues = { classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime }
@@ -189,6 +183,11 @@
     requestSuccess = ''
     responseStatus = null
     responseBody = ''
+
+    if (!API_BASE_URL) {
+      requestError = API_BASE_URL_ERROR
+      return
+    }
 
     if (validationErrors.length > 0) {
       return
@@ -210,7 +209,7 @@
       responseBody = await response.text()
 
       if (response.ok) {
-       requestSuccess = '送出成功，伺服器已接收 watch 資料。'
+        requestSuccess = '送出成功，伺服器已接收 watch 資料。'
       } else {
         requestError = `送出失敗（HTTP ${response.status}）。請確認 Token 和輸入值。`
       }
@@ -228,6 +227,9 @@
     <p class="description">
       依照欄位填寫資料後按「送出」，工具會自動組出 API request。Token 請自行貼上，不會預設任何密鑰。
     </p>
+    {#if !API_BASE_URL}
+      <div class="message error">{API_BASE_URL_ERROR}</div>
+    {/if}
 
     <form on:submit|preventDefault={submitRequest} class="form-block">
       <fieldset>
@@ -292,19 +294,21 @@
         <div class="message error">{requestError}</div>
       {/if}
 
-      <button type="submit" disabled={isSubmitting}>
+      <button type="submit" disabled={isSubmitting || !API_BASE_URL}>
         {isSubmitting ? '送出中…' : '送出 watch request'}
       </button>
     </form>
 
-    <section class="preview-block">
-      <h2>Request 預覽</h2>
-      <pre>{requestPreviewText}</pre>
-      <p class="preview-note">
-        下方 iframe 使用嚴格 sandbox（無任何額外權限）顯示預覽內容，用來隔離使用者輸入與頁面主環境，降低 XSS 風險。
-      </p>
-      <iframe title="Sandboxed request preview" sandbox="" srcdoc={sandboxPreviewDoc}></iframe>
-    </section>
+    {#if ENABLE_PREVIEW_PANES}
+      <section class="preview-block">
+        <h2>Request 預覽</h2>
+        <pre>{requestPreviewText}</pre>
+        <p class="preview-note">
+          下方 iframe 使用嚴格 sandbox（無任何額外權限）顯示預覽內容，用來隔離使用者輸入與頁面主環境，降低 XSS 風險。
+        </p>
+        <iframe title="Sandboxed request preview" sandbox="" srcdoc={sandboxPreviewDoc}></iframe>
+      </section>
+    {/if}
 
     {#if responseStatus !== null}
       <section class="response-block">

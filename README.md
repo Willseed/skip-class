@@ -10,15 +10,21 @@
 
 ## Configuration
 
-| Variable | Default | Description |
+| Variable | Required | Description |
 |---|---|---|
-| `VITE_API_BASE_URL` | `https://redacted.invalid/learning-center` | API base URL for the watch endpoint |
+| `VITE_API_BASE_URL` | Yes | API base URL for the watch endpoint（送出保護網址） |
+| `VITE_ENABLE_PREVIEW_PANES` | No（預設關閉） | 僅當值為嚴格字串 `true` 時啟用 request preview 與 sandbox iframe |
 
-建立 `.env.local` 覆蓋預設值（此檔案已在 `.gitignore`）：
+請在 `.env.local` 設定環境變數（此檔案已在 `.gitignore`）：
 
 ```bash
 VITE_API_BASE_URL=https://your-custom-api-host.example.com/path
+VITE_ENABLE_PREVIEW_PANES=false
 ```
+
+若未設定 `VITE_API_BASE_URL`，畫面會顯示明確錯誤訊息，且送出按鈕會停用。
+`VITE_ENABLE_PREVIEW_PANES` 只有在值為 `true` 時才會顯示 preview panes，其餘值（包含空白、`false`）都視為關閉。
+以上為 Vite build-time 變數，變更後需重新啟動 `npm run dev` 或重新建置。
 
 ## Install & Run
 
@@ -35,13 +41,12 @@ npm run dev
 2. 在 **授權** 貼上你自己的 Bearer Token（系統不會預填）。
 3. 在 **Payload** 填入 `last_view_time`、`played` 起訖、`learning_time`（皆為 0 以上整數）。
 4. 按 **送出 watch request**，查看成功/錯誤訊息與伺服器回應。
-5. 送出前可先看 **Request 預覽** 確認內容。
 
 ## Security Notes
 
 - 專案沒有硬編碼任何 Bearer Token；Token 必須由使用者自行貼上。
-- Token 欄位為密碼輸入，預覽區僅顯示遮罩後的 Token 片段。
-- Request 預覽在 `sandbox=""` iframe 內顯示，且內容先做 HTML escaping，以降低 XSS 風險。
+- 發送目標網址由 `VITE_API_BASE_URL` 設定，不在程式碼中硬編碼實際網域。
+- `VITE_*` 變數會打包到前端程式碼，僅可放非機密設定，切勿放 Token 或任何祕密資訊。
 - 請勿把真實 Token 貼到 issue、commit 或公開截圖。
 
 ## Testing
@@ -67,7 +72,14 @@ npm run test:e2e
 
 `.github/workflows/deploy-pages.yml` 會在 push（`main`/`master`）或手動觸發時部署：
 
+- 部署前會檢查 GitHub Actions secret `VITE_API_BASE_URL` 是否已設定（未設定會直接 fail）
 - 透過 `actions/configure-pages` 取得 Pages `base_path`
 - 以 `bun run build -- --base "${BASE_PATH%/}/"` 建置，確保 repo 子路徑與根路徑都能正確載入資源
 - 上傳 `dist/` 後使用 `actions/deploy-pages` 發佈
 - 若 VS Code GitHub Actions schema 對 `environment.name: github-pages` 顯示警告，這通常是 false-positive；實際合法性由 CI 的 `actionlint` 進行驗證
+
+### GitHub Secrets 設定（部署必填）
+
+請在 repo `Settings > Secrets and variables > Actions` 新增：
+
+- `VITE_API_BASE_URL`: 部署版前端要打的 API base URL
