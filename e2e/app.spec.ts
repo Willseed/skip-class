@@ -156,6 +156,9 @@ test('gets learning first, then sends watch requests for each qualifying activit
   await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
 
   await expect(page.getByText('已完成送出，共 3 筆 watch request 全部成功。')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible()
+  await expect(page.getByText('總筆數 3 筆｜成功 3 筆｜失敗 0 筆')).toBeVisible()
+  await expect(page.getByText('所有 watch request 已完成且皆成功。')).toBeVisible()
   await expect(page.getByRole('heading', { name: '符合條件的 learning activity（3）' })).toBeVisible()
   expect(learningRequests).toHaveLength(1)
   expect(learningRequests[0]).toEqual({
@@ -187,4 +190,135 @@ test('gets learning first, then sends watch requests for each qualifying activit
       learning_time: expectedDurations.get(activityId),
     })
   }
+})
+
+test('shows multi-send summary and detail rows for mixed watch results', async ({ page }) => {
+  await page.goto('/')
+
+  await page.route('**/class/*/learning', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          units: [
+            {
+              learning_activities: [
+                {
+                  id: 701,
+                  learning_activity_name: '影片一',
+                  material: { duration: 100 },
+                },
+                {
+                  id: 702,
+                  learning_activity_name: '影片二',
+                  material: { duration: 200 },
+                },
+                {
+                  id: 703,
+                  learning_activity_name: '影片三',
+                  material: { duration: 300 },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+  })
+
+  await page.route('**/class/*/learning-activity/*/watch', async (route) => {
+    const requestUrl = route.request().url()
+    const activityId = requestUrl.match(/learning-activity\/([^/]+)\/watch$/)?.[1]
+
+    if (activityId === '701') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: true }),
+      })
+      return
+    }
+
+    if (activityId === '702') {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: false, message: 'server error' }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 429,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: false, message: 'too many requests' }),
+    })
+  })
+
+  await page.getByPlaceholder('例如 594').fill('735')
+  await page.getByPlaceholder('貼上使用者自己的 Token').fill('test-token-value')
+  await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
+
+  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible()
+  await expect(page.getByText('總筆數 3 筆｜成功 1 筆｜失敗 2 筆')).toBeVisible()
+  await expect(page.getByText('部分 watch request 失敗，請查看下方回應明細。')).toBeVisible()
+  await expect(page.locator('.message.error')).toHaveCount(0)
+
+  await expect(page.locator('.watch-result-success')).toHaveCount(1)
+  await expect(page.locator('.watch-result-error')).toHaveCount(2)
+  await expect(page.locator('.watch-result', { hasText: '活動 #702 - 影片二' })).toContainText('HTTP 500')
+  await expect(page.locator('.watch-result', { hasText: '活動 #702 - 影片二' })).toContainText('"message":"server error"')
+  await expect(page.locator('.watch-result', { hasText: '活動 #703 - 影片三' })).toContainText('HTTP 429')
+})
+
+test('shows all-failure summary as multi-send info and keeps watch detail rows', async ({ page }) => {
+  await page.goto('/')
+
+  await page.route('**/class/*/learning', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          units: [
+            {
+              learning_activities: [
+                {
+                  id: 801,
+                  learning_activity_name: '影片甲',
+                  material: { duration: 90 },
+                },
+                {
+                  id: 802,
+                  learning_activity_name: '影片乙',
+                  material: { duration: 180 },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+  })
+
+  await page.route('**/class/*/learning-activity/*/watch', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: false, message: 'service unavailable' }),
+    })
+  })
+
+  await page.getByPlaceholder('例如 594').fill('735')
+  await page.getByPlaceholder('貼上使用者自己的 Token').fill('test-token-value')
+  await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
+
+  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible()
+  await expect(page.getByText('總筆數 2 筆｜成功 0 筆｜失敗 2 筆')).toBeVisible()
+  await expect(page.getByText('全部 watch request 皆失敗，請查看下方回應明細。')).toBeVisible()
+  await expect(page.locator('.message.error')).toHaveCount(0)
+  await expect(page.locator('.watch-result-success')).toHaveCount(0)
+  await expect(page.locator('.watch-result-error')).toHaveCount(2)
+  await expect(page.getByRole('heading', { name: 'Watch API 回應（共 2 筆）' })).toBeVisible()
 })

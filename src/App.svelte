@@ -33,6 +33,13 @@
     error: string | null
   }
 
+  type WatchBatchSummary = {
+    total: number
+    successCount: number
+    failedCount: number
+    status: 'all-success' | 'partial-success' | 'all-failed'
+  }
+
   const API_BASE_URL =
     typeof import.meta.env.VITE_API_BASE_URL === 'string'
       ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
@@ -53,6 +60,7 @@
   let learningFetchBody = ''
   let eligibleActivities: QualifiedActivity[] = []
   let watchResponses: WatchResponse[] = []
+  let watchBatchSummary: WatchBatchSummary | null = null
   let isSubmitting = false
   let requestPreviewText: string
   let sandboxPreviewDoc: string
@@ -297,6 +305,7 @@
     learningFetchBody = ''
     eligibleActivities = []
     watchResponses = []
+    watchBatchSummary = null
 
     if (!API_BASE_URL) {
       requestError = API_BASE_URL_ERROR
@@ -389,13 +398,15 @@
 
       const successCount = results.filter((result) => result.ok).length
       const failedCount = results.length - successCount
+      watchBatchSummary = {
+        total: results.length,
+        successCount,
+        failedCount,
+        status: failedCount === 0 ? 'all-success' : successCount === 0 ? 'all-failed' : 'partial-success',
+      }
 
       if (failedCount === 0) {
         requestSuccess = `已完成送出，共 ${successCount} 筆 watch request 全部成功。`
-      } else if (successCount === 0) {
-        requestError = `共 ${results.length} 筆 watch request 全部失敗，請檢查回應內容。`
-      } else {
-        requestError = `共 ${results.length} 筆 watch request，成功 ${successCount} 筆、失敗 ${failedCount} 筆。`
       }
     } catch (error: unknown) {
       requestError = `送出失敗：${error instanceof Error ? error.message : '未知錯誤'}`
@@ -484,6 +495,27 @@
     {/if}
 
     {#if watchResponses.length > 0}
+      <section class="response-block">
+        <h2>多筆發出資訊</h2>
+        {#if watchBatchSummary}
+          <p
+            class="batch-summary"
+            class:batch-summary-success={watchBatchSummary.status === 'all-success'}
+            class:batch-summary-partial={watchBatchSummary.status === 'partial-success'}
+            class:batch-summary-failed={watchBatchSummary.status === 'all-failed'}
+          >
+            總筆數 {watchBatchSummary.total} 筆｜成功 {watchBatchSummary.successCount} 筆｜失敗 {watchBatchSummary.failedCount} 筆
+          </p>
+          {#if watchBatchSummary.status === 'all-success'}
+            <p class="batch-summary-note">所有 watch request 已完成且皆成功。</p>
+          {:else if watchBatchSummary.status === 'all-failed'}
+            <p class="batch-summary-note">全部 watch request 皆失敗，請查看下方回應明細。</p>
+          {:else}
+            <p class="batch-summary-note">部分 watch request 失敗，請查看下方回應明細。</p>
+          {/if}
+        {/if}
+      </section>
+
       <section class="response-block">
         <h2>Watch API 回應（共 {watchResponses.length} 筆）</h2>
         {#each watchResponses as result (result.activityId)}
@@ -682,6 +714,40 @@
     border-radius: 0.75rem;
     border: 1px solid #cbd5e1;
     background: #f8fafc;
+  }
+
+  .batch-summary {
+    margin-top: 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e3a8a;
+    font-weight: 700;
+    padding: 0.75rem 0.9rem;
+  }
+
+  .batch-summary-success {
+    border-color: #86efac;
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .batch-summary-partial {
+    border-color: #facc15;
+    background: #fefce8;
+    color: #854d0e;
+  }
+
+  .batch-summary-failed {
+    border-color: #fca5a5;
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  .batch-summary-note {
+    margin: 0.5rem 0 0;
+    font-size: 0.9rem;
+    color: #334155;
   }
 
   .watch-result-success {
