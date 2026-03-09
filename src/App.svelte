@@ -1,271 +1,141 @@
 <script lang="ts">
-  type FormValues = {
-    classId: string
-    authToken: string
-  }
-
-  type FieldErrors = Partial<Record<keyof FormValues, string>>
-  type ValidationResult = {
-    errors: string[]
-    fieldErrors: FieldErrors
-  }
+  import { buildLearningUrl, buildWatchUrl, buildStartUrl } from './modules/api';
+  import { validateForm } from './modules/validation';
+import type { FormValues, FieldErrors, ValidationResult } from './modules/validation';
+  import { maskToken, createPreviewDocument } from './modules/preview';
+  import { wait, getRandomIntInclusive } from './utils/helpers';
 
   type WatchPayload = {
-    last_view_time: number
-    played: [[number, number]]
-    learning_time: number
-  }
+    last_view_time: number;
+    played: [[number, number]];
+    learning_time: number;
+  };
 
   type QualifiedActivity = {
-    id: string
-    name: string
-    duration: number
-  }
+    id: string;
+    name: string;
+    duration: number;
+  };
 
   type WatchResponse = {
-    activityId: string
-    activityName: string
-    duration: number
-    endpoint: string
-    status: number | null
-    body: string
-    ok: boolean
-    error: string | null
-  }
+    activityId: string;
+    activityName: string;
+    duration: number;
+    endpoint: string;
+    status: number | null;
+    body: string;
+    ok: boolean;
+    error: string | null;
+  };
 
   type WatchBatchSummary = {
-    total: number
-    successCount: number
-    failedCount: number
-    status: 'all-success' | 'partial-success' | 'all-failed'
-  }
+    total: number;
+    successCount: number;
+    failedCount: number;
+    status: 'all-success' | 'partial-success' | 'all-failed';
+  };
 
   const API_BASE_URL =
     typeof import.meta.env.VITE_API_BASE_URL === 'string'
       ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
-      : ''
-  const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true'
-  const WATCH_POST_INTERVAL_MS_MIN = 1000
-  const WATCH_POST_INTERVAL_MS_MAX = 3000
+      : '';
+  const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true';
+  const WATCH_POST_INTERVAL_MS_MIN = 1000;
+  const WATCH_POST_INTERVAL_MS_MAX = 3000;
   const API_BASE_URL_ERROR =
-    '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path'
+    '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path';
 
-  let classId = ''
-  let authToken = ''
+  let classId = '';
+  let authToken = '';
 
-  let validationErrors: string[] = []
-  let fieldErrors: FieldErrors = {}
-  let hasFailedValidationAttempt = false
-  let requestError = ''
-  let requestSuccess = ''
-  let learningFetchStatus: number | null = null
-  let learningFetchBody = ''
-  let eligibleActivities: QualifiedActivity[] = []
-  let watchResponses: WatchResponse[] = []
-  let watchBatchSummary: WatchBatchSummary | null = null
-  let isSubmitting = false
-  let requestPreviewText: string
-  let sandboxPreviewDoc: string
+  let validationErrors: string[] = [];
+  let fieldErrors: FieldErrors = {};
+  let hasFailedValidationAttempt = false;
+  let requestError = '';
+  let requestSuccess = '';
+  let learningFetchStatus: number | null = null;
+  let learningFetchBody = '';
+  let eligibleActivities: QualifiedActivity[] = [];
+  let watchResponses: WatchResponse[] = [];
+  let watchBatchSummary: WatchBatchSummary | null = null;
+  let isSubmitting = false;
+  let requestPreviewText: string;
+  let sandboxPreviewDoc: string;
 
-  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
-
-  const buildLearningUrl = (classIdValue: string, withPlaceholders = false): string => {
-    const classIdPath = classIdValue.trim()
-      ? encodeURIComponent(classIdValue.trim())
-      : withPlaceholders
-        ? '{classId}'
-        : ''
-
-    return `${API_BASE_URL}/class/${classIdPath}/learning`
-  }
-
-  const buildWatchUrl = (classIdValue: string, activityIdValue: string, withPlaceholders = false): string => {
-    const classIdPath = classIdValue.trim()
-      ? encodeURIComponent(classIdValue.trim())
-      : withPlaceholders
-        ? '{classId}'
-        : ''
-    const activityIdPath = activityIdValue.trim()
-      ? encodeURIComponent(activityIdValue.trim())
-      : withPlaceholders
-        ? '{activityId}'
-        : ''
-
-    return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/watch`
-  }
-
-  const buildStartUrl = (classIdValue: string, activityIdValue: string, withPlaceholders = false): string => {
-    const classIdPath = classIdValue.trim()
-      ? encodeURIComponent(classIdValue.trim())
-      : withPlaceholders
-        ? '{classId}'
-        : ''
-    const activityIdPath = activityIdValue.trim()
-      ? encodeURIComponent(activityIdValue.trim())
-      : withPlaceholders
-        ? '{activityId}'
-        : ''
-
-    return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/start`
-  }
-
-  const wait = async (ms: number): Promise<void> =>
-    new Promise((resolve) => {
-      setTimeout(resolve, ms)
-    })
-
-  const getRandomIntInclusive = (min: number, max: number): number => {
-    const normalizedMin = Math.ceil(min)
-    const normalizedMax = Math.floor(max)
-    return Math.floor(Math.random() * (normalizedMax - normalizedMin + 1)) + normalizedMin
-  }
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
   const buildPayload = (duration: number): WatchPayload => {
-    const safeDuration = Math.max(0, Math.floor(duration))
-
+    const safeDuration = Math.max(0, Math.floor(duration));
     return {
       last_view_time: safeDuration,
       played: [[0, safeDuration]],
       learning_time: safeDuration,
-    }
-  }
-
-  const escapeHtml = (value: string): string =>
-    value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
-
-  const maskToken = (token: string): string => {
-    const trimmedToken = token.trim()
-    if (!trimmedToken) {
-      return '(未輸入)'
-    }
-    if (trimmedToken.length <= 10) {
-      return `${trimmedToken.slice(0, 2)}***`
-    }
-    return `${trimmedToken.slice(0, 6)}...${trimmedToken.slice(-4)}`
-  }
-
-  const createPreviewDocument = (previewText: string): string => `<!doctype html>
-<html lang="zh-Hant">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Request Preview</title>
-    <style>
-      body { font-family: system-ui, sans-serif; padding: 12px; margin: 0; color: #0f172a; }
-      h2 { margin-top: 0; font-size: 16px; }
-      pre { white-space: pre-wrap; word-break: break-word; background: #f8fafc; border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; font-size: 12px; }
-    </style>
-  </head>
-  <body>
-    <h2>Sandbox Request Preview</h2>
-    <pre>${escapeHtml(previewText)}</pre>
-  </body>
-</html>`
-
-  const validateForm = (values: FormValues): ValidationResult => {
-    const errors: string[] = []
-    const nextFieldErrors: FieldErrors = {}
-    const setFieldError = (field: keyof FormValues, message: string): void => {
-      if (!nextFieldErrors[field]) {
-        nextFieldErrors[field] = message
-      }
-    }
-
-    if (!values.classId.trim()) {
-      const message = '請輸入課程ID(class)。'
-      errors.push(message)
-      setFieldError('classId', message)
-    }
-
-    if (!values.authToken.trim()) {
-      const message = '請輸入授權 Token。'
-      errors.push(message)
-      setFieldError('authToken', message)
-    }
-
-    return { errors, fieldErrors: nextFieldErrors }
-  }
+    };
+  };
 
   const applyValidation = (values: FormValues): ValidationResult => {
-    const result = validateForm(values)
-    validationErrors = result.errors
-    fieldErrors = result.fieldErrors
-    return result
-  }
+    const result = validateForm(values);
+    validationErrors = result.errors;
+    fieldErrors = result.fieldErrors;
+    return result;
+  };
 
   const extractQualifiedActivities = (payload: unknown): QualifiedActivity[] => {
     if (!isRecord(payload)) {
-      return []
+      return [];
     }
-
-    const data = payload.data
+    const data = payload.data;
     if (!isRecord(data)) {
-      return []
+      return [];
     }
-
-    const units = data.units
+    const units = data.units;
     if (!Array.isArray(units)) {
-      return []
+      return [];
     }
-
-    const results: QualifiedActivity[] = []
-    const seenActivityIds: Record<string, true> = {}
-
+    const results: QualifiedActivity[] = [];
+    const seenActivityIds: Record<string, true> = {};
     for (const unit of units) {
       if (!isRecord(unit)) {
-        continue
+        continue;
       }
-
-      const learningActivities = unit.learning_activities
+      const learningActivities = unit.learning_activities;
       if (!Array.isArray(learningActivities)) {
-        continue
+        continue;
       }
-
       for (const learningActivity of learningActivities) {
         if (!isRecord(learningActivity)) {
-          continue
+          continue;
         }
-
-        const rawId = learningActivity.id
+        const rawId = learningActivity.id;
         if (typeof rawId !== 'string' && typeof rawId !== 'number') {
-          continue
+          continue;
         }
-
-        const activityId = String(rawId).trim()
+        const activityId = String(rawId).trim();
         if (!activityId || seenActivityIds[activityId]) {
-          continue
+          continue;
         }
-
-        const material = learningActivity.material
+        const material = learningActivity.material;
         if (!isRecord(material)) {
-          continue
+          continue;
         }
-
-        const rawDuration = material.duration
+        const rawDuration = material.duration;
         if (typeof rawDuration !== 'number' || !Number.isFinite(rawDuration) || rawDuration < 0) {
-          continue
+          continue;
         }
-
-        const duration = Math.floor(rawDuration)
-        const rawName = learningActivity.learning_activity_name
+        const duration = Math.floor(rawDuration);
+        const rawName = learningActivity.learning_activity_name;
         const activityName =
-          typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : `活動 ${activityId}`
-
-        seenActivityIds[activityId] = true
+          typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : `活動 ${activityId}`;
+        seenActivityIds[activityId] = true;
         results.push({
           id: activityId,
           name: activityName,
           duration,
-        })
+        });
       }
     }
-
-    return results
-  }
+    return results;
+  };
 
   $: if (ENABLE_PREVIEW_PANES) {
     const startAndWatchPreviewEntries =
@@ -274,7 +144,7 @@
             activity_id: activity.id,
             step2_post_start: {
               method: 'POST',
-              url: buildStartUrl(classId, activity.id),
+              url: buildStartUrl(API_BASE_URL, classId, activity.id),
               headers: {
                 Accept: 'application/json',
                 Authorization: `Bearer ${maskToken(authToken)}`,
@@ -282,7 +152,7 @@
             },
             step3_post_watch: {
               method: 'POST',
-              url: buildWatchUrl(classId, activity.id),
+              url: buildWatchUrl(API_BASE_URL, classId, activity.id),
               headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
@@ -296,7 +166,7 @@
               activity_id: '{learningActivityId}',
               step2_post_start: {
                 method: 'POST',
-                url: buildStartUrl(classId, '', true),
+                url: buildStartUrl(API_BASE_URL, classId, '', true),
                 headers: {
                   Accept: 'application/json',
                   Authorization: `Bearer ${maskToken(authToken)}`,
@@ -304,7 +174,7 @@
               },
               step3_post_watch: {
                 method: 'POST',
-                url: buildWatchUrl(classId, '', true),
+                url: buildWatchUrl(API_BASE_URL, classId, '', true),
                 headers: {
                   Accept: 'application/json',
                   'Content-Type': 'application/json',
@@ -317,105 +187,90 @@
                 },
               },
             },
-          ]
-
+          ];
     const requestPreview = {
       step1_get_learning: {
         method: 'GET',
-        url: buildLearningUrl(classId, true),
+        url: buildLearningUrl(API_BASE_URL, classId, true),
         headers: {
           Accept: 'application/json',
           Authorization: `Bearer ${maskToken(authToken)}`,
         },
       },
       step2_post_start_then_watch_requests: startAndWatchPreviewEntries,
-    }
-
-    requestPreviewText = JSON.stringify(requestPreview, null, 2)
-    sandboxPreviewDoc = createPreviewDocument(requestPreviewText)
+    };
+    requestPreviewText = JSON.stringify(requestPreview, null, 2);
+    sandboxPreviewDoc = createPreviewDocument(requestPreviewText);
   } else {
-    requestPreviewText = ''
-    sandboxPreviewDoc = ''
+    requestPreviewText = '';
+    sandboxPreviewDoc = '';
   }
 
   $: if (hasFailedValidationAttempt) {
-    applyValidation({ classId, authToken })
+    applyValidation({ classId, authToken });
   }
 
   const submitRequest = async (): Promise<void> => {
     if (isSubmitting) {
-      return
+      return;
     }
-
-    const values: FormValues = { classId, authToken }
-    const { errors } = applyValidation(values)
-    hasFailedValidationAttempt = errors.length > 0
-
-    requestError = ''
-    requestSuccess = ''
-    learningFetchStatus = null
-    learningFetchBody = ''
-    eligibleActivities = []
-    watchResponses = []
-    watchBatchSummary = null
-
+    const values: FormValues = { classId, authToken };
+    const { errors } = applyValidation(values);
+    hasFailedValidationAttempt = errors.length > 0;
+    requestError = '';
+    requestSuccess = '';
+    learningFetchStatus = null;
+    learningFetchBody = '';
+    eligibleActivities = [];
+    watchResponses = [];
+    watchBatchSummary = null;
     if (!API_BASE_URL) {
-      requestError = API_BASE_URL_ERROR
-      return
+      requestError = API_BASE_URL_ERROR;
+      return;
     }
-
     if (validationErrors.length > 0) {
-      return
+      return;
     }
-
-    isSubmitting = true
+    isSubmitting = true;
     try {
-      const trimmedClassId = values.classId.trim()
-      const trimmedToken = values.authToken.trim()
-
-      const learningResponse = await fetch(buildLearningUrl(trimmedClassId), {
+      const trimmedClassId = values.classId.trim();
+      const trimmedToken = values.authToken.trim();
+      const learningResponse = await fetch(buildLearningUrl(API_BASE_URL, trimmedClassId), {
         method: 'GET',
         headers: {
           Accept: 'application/json',
           Authorization: `Bearer ${trimmedToken}`,
         },
-      })
-
-      learningFetchStatus = learningResponse.status
-      learningFetchBody = await learningResponse.text()
-
+      });
+      learningFetchStatus = learningResponse.status;
+      learningFetchBody = await learningResponse.text();
       if (!learningResponse.ok) {
-        requestError = `取得 learning 資料失敗（HTTP ${learningResponse.status}）。請確認課程ID與 Token。`
-        return
+        requestError = `取得 learning 資料失敗（HTTP ${learningResponse.status}）。請確認課程ID與 Token。`;
+        return;
       }
-
-      let learningPayload: unknown
+      let learningPayload: unknown;
       try {
-        learningPayload = learningFetchBody ? JSON.parse(learningFetchBody) : null
+        learningPayload = learningFetchBody ? JSON.parse(learningFetchBody) : null;
       } catch {
-        requestError = '取得 learning 資料成功，但回應不是有效 JSON。'
-        return
+        requestError = '取得 learning 資料成功，但回應不是有效 JSON。';
+        return;
       }
-
-      const activities = extractQualifiedActivities(learningPayload)
-      eligibleActivities = activities
-
+      const activities = extractQualifiedActivities(learningPayload);
+      eligibleActivities = activities;
       if (activities.length === 0) {
-        requestError = '找不到可送出的 learning activity：需具備 material 且 material.duration 為數字。'
-        return
+        requestError = '找不到可送出的 learning activity：需具備 material 且 material.duration 為數字。';
+        return;
       }
-
-      const results: WatchResponse[] = []
+      const results: WatchResponse[] = [];
       for (const [index, activity] of activities.entries()) {
-        const startEndpoint = buildStartUrl(trimmedClassId, activity.id)
-        const watchEndpoint = buildWatchUrl(trimmedClassId, activity.id)
+        const startEndpoint = buildStartUrl(API_BASE_URL, trimmedClassId, activity.id);
+        const watchEndpoint = buildWatchUrl(API_BASE_URL, trimmedClassId, activity.id);
         if (index > 0) {
-          const intervalMs = getRandomIntInclusive(WATCH_POST_INTERVAL_MS_MIN, WATCH_POST_INTERVAL_MS_MAX)
-          await wait(intervalMs)
+          const intervalMs = getRandomIntInclusive(WATCH_POST_INTERVAL_MS_MIN, WATCH_POST_INTERVAL_MS_MAX);
+          await wait(intervalMs);
         }
-
-        let startResponseStatus: number | null = null
-        let startResponseBody = ''
+        let startResponseStatus: number | null = null;
+        let startResponseBody = '';
         try {
           const startResponse = await fetch(startEndpoint, {
             method: 'POST',
@@ -423,9 +278,9 @@
               Accept: 'application/json',
               Authorization: `Bearer ${trimmedToken}`,
             },
-          })
-          startResponseStatus = startResponse.status
-          startResponseBody = await startResponse.text()
+          });
+          startResponseStatus = startResponse.status;
+          startResponseBody = await startResponse.text();
           if (!startResponse.ok) {
             results.push({
               activityId: activity.id,
@@ -436,8 +291,8 @@
               body: startResponseBody,
               ok: false,
               error: `start request 失敗（HTTP ${startResponseStatus}），已略過 watch。start URL：${startEndpoint}`,
-            })
-            continue
+            });
+            continue;
           }
         } catch (error: unknown) {
           results.push({
@@ -449,10 +304,9 @@
             body: startResponseBody,
             ok: false,
             error: `start request 發生錯誤，已略過 watch。start URL：${startEndpoint}；${error instanceof Error ? error.message : '未知錯誤'}`,
-          })
-          continue
+          });
+          continue;
         }
-
         try {
           const response = await fetch(watchEndpoint, {
             method: 'POST',
@@ -462,9 +316,8 @@
               Authorization: `Bearer ${trimmedToken}`,
             },
             body: JSON.stringify(buildPayload(activity.duration)),
-          })
-
-          const responseText = await response.text()
+          });
+          const responseText = await response.text();
           results.push({
             activityId: activity.id,
             activityName: activity.name,
@@ -474,7 +327,7 @@
             body: responseText,
             ok: response.ok,
             error: null,
-          })
+          });
         } catch (error: unknown) {
           results.push({
             activityId: activity.id,
@@ -485,30 +338,27 @@
             body: '',
             ok: false,
             error: error instanceof Error ? error.message : '未知錯誤',
-          })
+          });
         }
       }
-
-      watchResponses = results
-
-      const successCount = results.filter((result) => result.ok).length
-      const failedCount = results.length - successCount
+      watchResponses = results;
+      const successCount = results.filter((result) => result.ok).length;
+      const failedCount = results.length - successCount;
       watchBatchSummary = {
         total: results.length,
         successCount,
         failedCount,
         status: failedCount === 0 ? 'all-success' : successCount === 0 ? 'all-failed' : 'partial-success',
-      }
-
+      };
       if (failedCount === 0) {
-        requestSuccess = `已完成送出，共 ${successCount} 筆 watch request 全部成功。`
+        requestSuccess = `已完成送出，共 ${successCount} 筆 watch request 全部成功。`;
       }
     } catch (error: unknown) {
-      requestError = `送出失敗：${error instanceof Error ? error.message : '未知錯誤'}`
+      requestError = `送出失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
     } finally {
-      isSubmitting = false
+      isSubmitting = false;
     }
-  }
+  };
 </script>
 
 <main>
