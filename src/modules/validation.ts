@@ -10,10 +10,6 @@ export type ValidationResult = {
   fieldErrors: FieldErrors;
 };
 
-// Use type-only re-exports for Svelte compatibility
-export type { FormValues, FieldErrors, ValidationResult };
-
-
 export const validateForm = (values: FormValues): ValidationResult => {
   const errors: string[] = [];
   const nextFieldErrors: FieldErrors = {};

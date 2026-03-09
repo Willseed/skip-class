@@ -1,38 +1,14 @@
 <script lang="ts">
-  import { buildLearningUrl, buildWatchUrl, buildStartUrl } from './modules/api';
+  import { buildLearningUrl } from './modules/api';
   import { validateForm } from './modules/validation';
-import type { FormValues, FieldErrors, ValidationResult } from './modules/validation';
-  import { maskToken, createPreviewDocument } from './modules/preview';
-  import { wait, getRandomIntInclusive } from './utils/helpers';
-
-  type WatchPayload = {
-    last_view_time: number;
-    played: [[number, number]];
-    learning_time: number;
-  };
-
-  type QualifiedActivity = {
-    id: string;
-    name: string;
-    duration: number;
-  };
-
-  type WatchResponse = {
-    activityId: string;
-    activityName: string;
-    duration: number;
-    status: number | null;
-    body: string;
-    ok: boolean;
-    error: string | null;
-  };
-
-  type WatchBatchSummary = {
-    total: number;
-    successCount: number;
-    failedCount: number;
-    status: 'all-success' | 'partial-success' | 'all-failed';
-  };
+  import type { FieldErrors, FormValues, ValidationResult } from './modules/validation';
+  import { createPreviewDocument } from './modules/preview';
+  import {
+    buildRequestPreviewData,
+    extractQualifiedActivities,
+    runWatchBatch,
+  } from './modules/watch';
+  import type { QualifiedActivity, WatchBatchSummary, WatchResponse } from './modules/watch';
 
   const API_BASE_URL =
     typeof import.meta.env.VITE_API_BASE_URL === 'string'
@@ -61,17 +37,6 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
   let requestPreviewText: string;
   let sandboxPreviewDoc: string;
 
-  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-
-  const buildPayload = (duration: number): WatchPayload => {
-    const safeDuration = Math.max(0, Math.floor(duration));
-    return {
-      last_view_time: safeDuration,
-      played: [[0, safeDuration]],
-      learning_time: safeDuration,
-    };
-  };
-
   const applyValidation = (values: FormValues): ValidationResult => {
     const result = validateForm(values);
     validationErrors = result.errors;
@@ -79,125 +44,13 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
     return result;
   };
 
-  const extractQualifiedActivities = (payload: unknown): QualifiedActivity[] => {
-    if (!isRecord(payload)) {
-      return [];
-    }
-    const data = payload.data;
-    if (!isRecord(data)) {
-      return [];
-    }
-    const units = data.units;
-    if (!Array.isArray(units)) {
-      return [];
-    }
-    const results: QualifiedActivity[] = [];
-    const seenActivityIds: Record<string, true> = {};
-    for (const unit of units) {
-      if (!isRecord(unit)) {
-        continue;
-      }
-      const learningActivities = unit.learning_activities;
-      if (!Array.isArray(learningActivities)) {
-        continue;
-      }
-      for (const learningActivity of learningActivities) {
-        if (!isRecord(learningActivity)) {
-          continue;
-        }
-        const rawId = learningActivity.id;
-        if (typeof rawId !== 'string' && typeof rawId !== 'number') {
-          continue;
-        }
-        const activityId = String(rawId).trim();
-        if (!activityId || seenActivityIds[activityId]) {
-          continue;
-        }
-        const material = learningActivity.material;
-        if (!isRecord(material)) {
-          continue;
-        }
-        const rawDuration = material.duration;
-        if (typeof rawDuration !== 'number' || !Number.isFinite(rawDuration) || rawDuration < 0) {
-          continue;
-        }
-        const duration = Math.floor(rawDuration);
-        const rawName = learningActivity.learning_activity_name;
-        const activityName =
-          typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : `活動 ${activityId}`;
-        seenActivityIds[activityId] = true;
-        results.push({
-          id: activityId,
-          name: activityName,
-          duration,
-        });
-      }
-    }
-    return results;
-  };
-
   $: if (ENABLE_PREVIEW_PANES) {
-    const startAndWatchPreviewEntries =
-      eligibleActivities.length > 0
-        ? eligibleActivities.map((activity) => ({
-            activity_id: activity.id,
-            step2_post_start: {
-              method: 'POST',
-              url: buildStartUrl(API_BASE_URL, classId, activity.id),
-              headers: {
-                Accept: 'application/json',
-                Authorization: `Bearer ${maskToken(authToken)}`,
-              },
-            },
-            step3_post_watch: {
-              method: 'POST',
-              url: buildWatchUrl(API_BASE_URL, classId, activity.id),
-              headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${maskToken(authToken)}`,
-              },
-              body: buildPayload(activity.duration),
-            },
-          }))
-        : [
-            {
-              activity_id: '{learningActivityId}',
-              step2_post_start: {
-                method: 'POST',
-                url: buildStartUrl(API_BASE_URL, classId, '', true),
-                headers: {
-                  Accept: 'application/json',
-                  Authorization: `Bearer ${maskToken(authToken)}`,
-                },
-              },
-              step3_post_watch: {
-                method: 'POST',
-                url: buildWatchUrl(API_BASE_URL, classId, '', true),
-                headers: {
-                  Accept: 'application/json',
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${maskToken(authToken)}`,
-                },
-                body: {
-                  last_view_time: 'material.duration',
-                  played: [[0, 'material.duration']],
-                  learning_time: 'material.duration',
-                },
-              },
-            },
-          ];
-    const requestPreview = {
-      step1_get_learning: {
-        method: 'GET',
-        url: buildLearningUrl(API_BASE_URL, classId, true),
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${maskToken(authToken)}`,
-        },
-      },
-      step2_post_start_then_watch_requests: startAndWatchPreviewEntries,
-    };
+    const requestPreview = buildRequestPreviewData({
+      apiBaseUrl: API_BASE_URL,
+      classId,
+      authToken,
+      eligibleActivities,
+    });
     requestPreviewText = JSON.stringify(requestPreview, null, 2);
     sandboxPreviewDoc = createPreviewDocument(requestPreviewText);
   } else {
@@ -213,6 +66,7 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
     if (isSubmitting) {
       return;
     }
+
     const values: FormValues = { classId, authToken };
     const { errors } = applyValidation(values);
     hasFailedValidationAttempt = errors.length > 0;
@@ -223,14 +77,18 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
     eligibleActivities = [];
     watchResponses = [];
     watchBatchSummary = null;
+
     if (!API_BASE_URL) {
       requestError = API_BASE_URL_ERROR;
       return;
     }
+
     if (validationErrors.length > 0) {
       return;
     }
+
     isSubmitting = true;
+
     try {
       const trimmedClassId = values.classId.trim();
       const trimmedToken = values.authToken.trim();
@@ -241,12 +99,15 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
           Authorization: `Bearer ${trimmedToken}`,
         },
       });
+
       learningFetchStatus = learningResponse.status;
       learningFetchBody = await learningResponse.text();
+
       if (!learningResponse.ok) {
         requestError = `取得 learning 資料失敗（HTTP ${learningResponse.status}）。請確認課程ID與 Token。`;
         return;
       }
+
       let learningPayload: unknown;
       try {
         learningPayload = learningFetchBody ? JSON.parse(learningFetchBody) : null;
@@ -254,99 +115,28 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
         requestError = '取得 learning 資料成功，但回應不是有效 JSON。';
         return;
       }
+
       const activities = extractQualifiedActivities(learningPayload);
       eligibleActivities = activities;
+
       if (activities.length === 0) {
         requestError = '找不到可送出的 learning activity：需具備 material 且 material.duration 為數字。';
         return;
       }
-      const results: WatchResponse[] = [];
-      for (const [index, activity] of activities.entries()) {
-        const startEndpoint = buildStartUrl(API_BASE_URL, trimmedClassId, activity.id);
-        const watchEndpoint = buildWatchUrl(API_BASE_URL, trimmedClassId, activity.id);
-        if (index > 0) {
-          const intervalMs = getRandomIntInclusive(WATCH_POST_INTERVAL_MS_MIN, WATCH_POST_INTERVAL_MS_MAX);
-          await wait(intervalMs);
-        }
-        let startResponseStatus: number | null = null;
-        let startResponseBody = '';
-        try {
-          const startResponse = await fetch(startEndpoint, {
-            method: 'POST',
-            headers: {
-              Accept: 'application/json',
-              Authorization: `Bearer ${trimmedToken}`,
-            },
-          });
-          startResponseStatus = startResponse.status;
-          startResponseBody = await startResponse.text();
-          if (!startResponse.ok) {
-            results.push({
-              activityId: activity.id,
-              activityName: activity.name,
-              duration: activity.duration,
-              status: startResponseStatus,
-              body: startResponseBody,
-              ok: false,
-              error: `start request 失敗（HTTP ${startResponseStatus}），已略過 watch。`,
-            });
-            continue;
-          }
-        } catch (error: unknown) {
-          results.push({
-            activityId: activity.id,
-            activityName: activity.name,
-            duration: activity.duration,
-            status: startResponseStatus,
-            body: startResponseBody,
-            ok: false,
-            error: `start request 發生錯誤，已略過 watch。${error instanceof Error ? error.message : '未知錯誤'}`,
-          });
-          continue;
-        }
-        try {
-          const response = await fetch(watchEndpoint, {
-            method: 'POST',
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${trimmedToken}`,
-            },
-            body: JSON.stringify(buildPayload(activity.duration)),
-          });
-          const responseText = await response.text();
-          results.push({
-            activityId: activity.id,
-            activityName: activity.name,
-            duration: activity.duration,
-            status: response.status,
-            body: responseText,
-            ok: response.ok,
-            error: null,
-          });
-        } catch (error: unknown) {
-          results.push({
-            activityId: activity.id,
-            activityName: activity.name,
-            duration: activity.duration,
-            status: null,
-            body: '',
-            ok: false,
-            error: error instanceof Error ? error.message : '未知錯誤',
-          });
-        }
-      }
-      watchResponses = results;
-      const successCount = results.filter((result) => result.ok).length;
-      const failedCount = results.length - successCount;
-      watchBatchSummary = {
-        total: results.length,
-        successCount,
-        failedCount,
-        status: failedCount === 0 ? 'all-success' : successCount === 0 ? 'all-failed' : 'partial-success',
-      };
-      if (failedCount === 0) {
-        requestSuccess = `已完成送出，共 ${successCount} 筆 watch request 全部成功。`;
+
+      const batchResult = await runWatchBatch({
+        apiBaseUrl: API_BASE_URL,
+        classId: trimmedClassId,
+        authToken: trimmedToken,
+        activities,
+        intervalMinMs: WATCH_POST_INTERVAL_MS_MIN,
+        intervalMaxMs: WATCH_POST_INTERVAL_MS_MAX,
+      });
+
+      watchResponses = batchResult.responses;
+      watchBatchSummary = batchResult.summary;
+      if (batchResult.successMessage) {
+        requestSuccess = batchResult.successMessage;
       }
     } catch (error: unknown) {
       requestError = `送出失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
@@ -355,6 +145,7 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
     }
   };
 </script>
+
 
 <main>
   <section class="tool-card" class:tool-card-submitting={isSubmitting} inert={isSubmitting} aria-busy={isSubmitting}>
