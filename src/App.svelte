@@ -45,8 +45,8 @@
       ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
       : ''
   const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true'
-  const WATCH_POST_INTERVAL_SECONDS_MIN = 3
-  const WATCH_POST_INTERVAL_SECONDS_MAX = 5
+  const WATCH_POST_INTERVAL_MS_MIN = 1000
+  const WATCH_POST_INTERVAL_MS_MAX = 3000
   const API_BASE_URL_ERROR =
     '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path'
 
@@ -92,6 +92,21 @@
         : ''
 
     return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/watch`
+  }
+
+  const buildStartUrl = (classIdValue: string, activityIdValue: string, withPlaceholders = false): string => {
+    const classIdPath = classIdValue.trim()
+      ? encodeURIComponent(classIdValue.trim())
+      : withPlaceholders
+        ? '{classId}'
+        : ''
+    const activityIdPath = activityIdValue.trim()
+      ? encodeURIComponent(activityIdValue.trim())
+      : withPlaceholders
+        ? '{activityId}'
+        : ''
+
+    return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/start`
   }
 
   const wait = async (ms: number): Promise<void> =>
@@ -253,11 +268,19 @@
   }
 
   $: if (ENABLE_PREVIEW_PANES) {
-    const postPreviewEntries =
+    const startAndWatchPreviewEntries =
       eligibleActivities.length > 0
         ? eligibleActivities.map((activity) => ({
             activity_id: activity.id,
-            request: {
+            step2_post_start: {
+              method: 'POST',
+              url: buildStartUrl(classId, activity.id),
+              headers: {
+                Accept: 'application/json',
+                Authorization: `Bearer ${maskToken(authToken)}`,
+              },
+            },
+            step3_post_watch: {
               method: 'POST',
               url: buildWatchUrl(classId, activity.id),
               headers: {
@@ -271,7 +294,15 @@
         : [
             {
               activity_id: '{learningActivityId}',
-              request: {
+              step2_post_start: {
+                method: 'POST',
+                url: buildStartUrl(classId, '', true),
+                headers: {
+                  Accept: 'application/json',
+                  Authorization: `Bearer ${maskToken(authToken)}`,
+                },
+              },
+              step3_post_watch: {
                 method: 'POST',
                 url: buildWatchUrl(classId, '', true),
                 headers: {
@@ -297,7 +328,7 @@
           Authorization: `Bearer ${maskToken(authToken)}`,
         },
       },
-      step2_post_watch_requests: postPreviewEntries,
+      step2_post_start_then_watch_requests: startAndWatchPreviewEntries,
     }
 
     requestPreviewText = JSON.stringify(requestPreview, null, 2)
@@ -376,17 +407,54 @@
 
       const results: WatchResponse[] = []
       for (const [index, activity] of activities.entries()) {
-        const endpoint = buildWatchUrl(trimmedClassId, activity.id)
+        const startEndpoint = buildStartUrl(trimmedClassId, activity.id)
+        const watchEndpoint = buildWatchUrl(trimmedClassId, activity.id)
         if (index > 0) {
-          const intervalSeconds = getRandomIntInclusive(
-            WATCH_POST_INTERVAL_SECONDS_MIN,
-            WATCH_POST_INTERVAL_SECONDS_MAX,
-          )
-          await wait(intervalSeconds * 1000)
+          const intervalMs = getRandomIntInclusive(WATCH_POST_INTERVAL_MS_MIN, WATCH_POST_INTERVAL_MS_MAX)
+          await wait(intervalMs)
+        }
+
+        let startResponseStatus: number | null = null
+        let startResponseBody = ''
+        try {
+          const startResponse = await fetch(startEndpoint, {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${trimmedToken}`,
+            },
+          })
+          startResponseStatus = startResponse.status
+          startResponseBody = await startResponse.text()
+          if (!startResponse.ok) {
+            results.push({
+              activityId: activity.id,
+              activityName: activity.name,
+              duration: activity.duration,
+              endpoint: startEndpoint,
+              status: startResponseStatus,
+              body: startResponseBody,
+              ok: false,
+              error: `start request 失敗（HTTP ${startResponseStatus}），已略過 watch。start URL：${startEndpoint}`,
+            })
+            continue
+          }
+        } catch (error: unknown) {
+          results.push({
+            activityId: activity.id,
+            activityName: activity.name,
+            duration: activity.duration,
+            endpoint: startEndpoint,
+            status: startResponseStatus,
+            body: startResponseBody,
+            ok: false,
+            error: `start request 發生錯誤，已略過 watch。start URL：${startEndpoint}；${error instanceof Error ? error.message : '未知錯誤'}`,
+          })
+          continue
         }
 
         try {
-          const response = await fetch(endpoint, {
+          const response = await fetch(watchEndpoint, {
             method: 'POST',
             headers: {
               Accept: 'application/json',
@@ -401,7 +469,7 @@
             activityId: activity.id,
             activityName: activity.name,
             duration: activity.duration,
-            endpoint,
+            endpoint: watchEndpoint,
             status: response.status,
             body: responseText,
             ok: response.ok,
@@ -412,7 +480,7 @@
             activityId: activity.id,
             activityName: activity.name,
             duration: activity.duration,
-            endpoint,
+            endpoint: watchEndpoint,
             status: null,
             body: '',
             ok: false,
@@ -447,7 +515,7 @@
   <section class="tool-card" class:tool-card-submitting={isSubmitting} inert={isSubmitting} aria-busy={isSubmitting}>
     <h1>Watch API 填寫工具</h1>
     <p class="description">
-      輸入課程ID與 Token 後按「送出」，工具會先取得 learning 清單，再依符合條件的 learning activity 自動逐筆送出 watch request。
+      輸入課程ID與 Token 後按「送出」，工具會先取得 learning 清單，再依符合條件的 learning activity 逐筆先送出 start、再送出 watch request。
     </p>
     {#if !API_BASE_URL}
       <div class="message error">{API_BASE_URL_ERROR}</div>
@@ -574,7 +642,7 @@
         <span class="clock-spinner submitting-clock" aria-hidden="true">🕒</span>
         <div>
           <p class="submitting-title">送出中，請稍候…</p>
-          <p class="submitting-description">系統正在逐筆送出 watch request，期間已暫時鎖定頁面操作。</p>
+          <p class="submitting-description">系統正在逐筆送出 start / watch request，期間已暫時鎖定頁面操作。</p>
         </div>
       </div>
     </div>

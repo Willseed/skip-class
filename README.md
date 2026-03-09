@@ -1,6 +1,6 @@
 # Watch API Web Tool
 
-以 Svelte + Vite 製作的工具，讓使用者輸入課程 ID 後，先取得課程學習活動，再自動批次送出 watch API POST request。
+以 Svelte + Vite 製作的工具，讓使用者輸入課程 ID 後，先取得課程學習活動，再自動批次逐筆送出 start + watch API POST request。
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@
 
 | Variable | Required | Description |
 |---|---|---|
-| `VITE_API_BASE_URL` | Yes | API base URL（會用於 `/class/{classId}/learning` 與後續 watch POST endpoint） |
+| `VITE_API_BASE_URL` | Yes | API base URL（會用於 `/class/{classId}/learning` 與後續 start/watch POST endpoint） |
 | `VITE_ENABLE_PREVIEW_PANES` | No（預設關閉） | 僅當值為嚴格字串 `true` 時啟用 request preview 與 sandbox iframe |
 
 請在 `.env.local` 設定環境變數（此檔案已在 `.gitignore`）：
@@ -41,8 +41,10 @@ npm run dev
 1. 在畫面輸入課程 ID（`classId`）與 Bearer Token。
 2. 按 **取得 learning 並送出 watch requests** 後，系統會先用 `VITE_API_BASE_URL` 組出 `GET /class/{classId}/learning` 取得課程資料。
 3. 系統會從回傳資料的 `data.units[].learning_activities[]` 中，挑出「有 `id` 且 `material.duration` 為數字」的活動，其他類型（例如無影片時長）會跳過。
-4. 針對上述每個活動 ID，系統會以 async/await 逐筆送出 `POST /class/{classId}/learning-activity/{activityId}/watch`（第一筆立即送出，後續每筆送出前隨機延遲 `3~5` 秒），並顯示每筆成功/錯誤結果。
-5. 每筆 watch payload 直接使用活動 `material.duration`：`last_view_time = duration`、`played = [[0, duration]]`、`learning_time = duration`。
+4. 針對上述每個活動 ID，系統會以 async/await 逐筆先送出 `POST /class/{classId}/learning-activity/{activityId}/start`，成功後再送出 `POST /class/{classId}/learning-activity/{activityId}/watch`。
+5. 第一筆活動立即處理，後續每筆活動開始前會隨機延遲 `1000~3000` 毫秒（維持逐筆處理語意）。
+6. 若某筆 start 失敗，該筆會略過 watch、記錄錯誤並繼續下一筆，避免整批流程中斷。
+7. 每筆 watch payload 直接使用活動 `material.duration`：`last_view_time = duration`、`played = [[0, duration]]`、`learning_time = duration`。
 
 ## Security Notes
 
