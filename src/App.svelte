@@ -45,7 +45,8 @@
       ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
       : ''
   const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true'
-  const WATCH_REQUEST_DELAY_MS = 1000
+  const WATCH_POST_INTERVAL_SECONDS_MIN = 5
+  const WATCH_POST_INTERVAL_SECONDS_MAX = 10
   const WATCH_RANDOM_EXTRA_SECONDS_MIN = 10
   const WATCH_RANDOM_EXTRA_SECONDS_MAX = 30
   const API_BASE_URL_ERROR =
@@ -324,6 +325,10 @@
   }
 
   const submitRequest = async (): Promise<void> => {
+    if (isSubmitting) {
+      return
+    }
+
     const values: FormValues = { classId, authToken }
     const { errors } = applyValidation(values)
     hasFailedValidationAttempt = errors.length > 0
@@ -383,9 +388,15 @@
       }
 
       const results: WatchResponse[] = []
-      for (const activity of activities) {
+      for (const [index, activity] of activities.entries()) {
         const endpoint = buildWatchUrl(trimmedClassId, activity.id)
-        await wait(WATCH_REQUEST_DELAY_MS)
+        if (index > 0) {
+          const intervalSeconds = getRandomIntInclusive(
+            WATCH_POST_INTERVAL_SECONDS_MIN,
+            WATCH_POST_INTERVAL_SECONDS_MAX,
+          )
+          await wait(intervalSeconds * 1000)
+        }
 
         try {
           const response = await fetch(endpoint, {
@@ -446,7 +457,7 @@
 </script>
 
 <main>
-  <section class="tool-card">
+  <section class="tool-card" class:tool-card-submitting={isSubmitting} inert={isSubmitting} aria-busy={isSubmitting}>
     <h1>Watch API 填寫工具</h1>
     <p class="description">
       輸入課程ID與 Token 後按「送出」，工具會先取得 learning 清單，再依符合條件的 learning activity 自動逐筆送出 watch request。
@@ -455,8 +466,8 @@
       <div class="message error">{API_BASE_URL_ERROR}</div>
     {/if}
 
-    <form on:submit|preventDefault={submitRequest} class="form-block">
-      <fieldset>
+    <form on:submit|preventDefault={submitRequest} class="form-block" aria-disabled={isSubmitting}>
+      <fieldset disabled={isSubmitting}>
         <legend>1. API 路徑</legend>
         <label>
           課程ID(class)
@@ -467,7 +478,7 @@
         </label>
       </fieldset>
 
-      <fieldset>
+      <fieldset disabled={isSubmitting}>
         <legend>2. 授權</legend>
         <label>
           Bearer Token（請貼上完整 Token）
@@ -486,7 +497,12 @@
       {/if}
 
       <button type="submit" disabled={isSubmitting || !API_BASE_URL}>
-        {isSubmitting ? '送出中…' : '取得 learning 並送出 watch requests'}
+        {#if isSubmitting}
+          <span class="clock-spinner" aria-hidden="true">🕒</span>
+          <span>送出中…</span>
+        {:else}
+          取得 learning 並送出 watch requests
+        {/if}
       </button>
     </form>
 
@@ -565,6 +581,17 @@
       </section>
     {/if}
   </section>
+  {#if isSubmitting}
+    <div class="submitting-overlay" role="status" aria-live="polite" aria-atomic="true">
+      <div class="submitting-panel">
+        <span class="clock-spinner submitting-clock" aria-hidden="true">🕒</span>
+        <div>
+          <p class="submitting-title">送出中，請稍候…</p>
+          <p class="submitting-description">系統正在逐筆送出 watch request，期間已暫時鎖定頁面操作。</p>
+        </div>
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -588,6 +615,11 @@
     border-radius: 1rem;
     background: #fff;
     box-shadow: 0 12px 30px rgba(15, 23, 42, 0.1);
+  }
+
+  .tool-card-submitting {
+    pointer-events: none;
+    user-select: none;
   }
 
   .description {
@@ -656,6 +688,10 @@
 
   button {
     margin-top: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
     border: none;
     border-radius: 0.6rem;
     background: #1d4ed8;
@@ -669,6 +705,53 @@
   button:disabled {
     cursor: wait;
     background: #64748b;
+  }
+
+  .clock-spinner {
+    display: inline-flex;
+    line-height: 1;
+    animation: clockSpin 1s linear infinite;
+  }
+
+  .submitting-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.38);
+  }
+
+  .submitting-panel {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    width: min(560px, 100%);
+    padding: 1rem 1.1rem;
+    border-radius: 0.9rem;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #0f172a;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+  }
+
+  .submitting-clock {
+    font-size: 1.8rem;
+  }
+
+  .submitting-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  .submitting-description {
+    margin: 0.3rem 0 0;
+    font-size: 0.92rem;
+    color: #1e293b;
+    line-height: 1.45;
   }
 
   .message {
@@ -694,6 +777,15 @@
     }
     50% {
       opacity: 1;
+    }
+  }
+
+  @keyframes clockSpin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
     }
   }
 

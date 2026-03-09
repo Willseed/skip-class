@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+const WATCH_SUBMISSION_TIMEOUT_MS = 30_000
+
 test('shows the watch api tool heading', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Watch API 填寫工具' })).toBeVisible()
@@ -77,6 +79,7 @@ test('runs input-error animation once instead of infinitely for invalid fields',
 })
 
 test('gets learning first, then sends watch requests for each qualifying activity', async ({ page }) => {
+  test.setTimeout(45_000)
   await page.goto('/')
 
   const requestMethods: string[] = []
@@ -85,7 +88,8 @@ test('gets learning first, then sends watch requests for each qualifying activit
     []
   let activeWatchRequests = 0
   let maxConcurrentWatchRequests = 0
-  const watchRequestDelayTolerance = { min: 850, max: 2600 }
+  const firstWatchRequestMaxDelayMs = 3_000
+  const watchRequestSpacingToleranceMs = { min: 4_900, max: 11_500 }
   const mockedWatchResponseDelayMs = 200
 
   await page.route('**/class/*/learning', async (route) => {
@@ -164,12 +168,39 @@ test('gets learning first, then sends watch requests for each qualifying activit
     }
   })
 
-  await page.getByPlaceholder('例如 594').fill('735')
-  await page.getByPlaceholder('貼上使用者自己的 Token').fill('test-token-value')
-  const submitStartedAt = Date.now()
-  await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
+  const classIdInput = page.getByPlaceholder('例如 594')
+  const authTokenInput = page.getByPlaceholder('貼上使用者自己的 Token')
+  const submitButton = page.locator('button[type="submit"]')
+  const toolCard = page.locator('.tool-card')
+  const form = page.locator('form.form-block')
+  const submittingOverlay = page.locator('.submitting-overlay')
 
-  await expect(page.getByText('已完成送出，共 3 筆 watch request 全部成功。')).toBeVisible()
+  await classIdInput.fill('735')
+  await authTokenInput.fill('test-token-value')
+  const submitStartedAt = Date.now()
+  await submitButton.click()
+
+  await expect(submittingOverlay).toBeVisible()
+  await expect(submittingOverlay).toContainText('送出中，請稍候…')
+  await expect(submittingOverlay).toContainText('期間已暫時鎖定頁面操作')
+  await expect(submittingOverlay.locator('.clock-spinner')).toBeVisible()
+  await expect(toolCard).toHaveAttribute('aria-busy', 'true')
+  await expect(toolCard).toHaveAttribute('inert', '')
+  await expect(form).toHaveAttribute('aria-disabled', 'true')
+  await expect(form.locator('fieldset').first()).toBeDisabled()
+  await expect(form.locator('fieldset').nth(1)).toBeDisabled()
+  await expect(submitButton).toBeDisabled()
+  await expect(submitButton).toContainText('送出中…')
+  await expect(submitButton.locator('.clock-spinner')).toBeVisible()
+
+  await expect(page.getByText('已完成送出，共 3 筆 watch request 全部成功。')).toBeVisible({
+    timeout: WATCH_SUBMISSION_TIMEOUT_MS,
+  })
+  await expect(submittingOverlay).toHaveCount(0)
+  await expect(toolCard).toHaveAttribute('aria-busy', 'false')
+  await expect(toolCard).not.toHaveAttribute('inert', '')
+  await expect(form).toHaveAttribute('aria-disabled', 'false')
+  await expect(submitButton).toContainText('取得 learning 並送出 watch requests')
   await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible()
   await expect(page.getByText('總筆數 3 筆｜成功 3 筆｜失敗 0 筆')).toBeVisible()
   await expect(page.getByText('所有 watch request 已完成且皆成功。')).toBeVisible()
@@ -184,12 +215,12 @@ test('gets learning first, then sends watch requests for each qualifying activit
   expect(watchRequests).toHaveLength(3)
   expect(maxConcurrentWatchRequests).toBe(1)
 
-  expect(watchRequests[0].requestedAt - submitStartedAt).toBeGreaterThanOrEqual(watchRequestDelayTolerance.min)
-  expect(watchRequests[0].requestedAt - submitStartedAt).toBeLessThanOrEqual(watchRequestDelayTolerance.max)
+  expect(watchRequests[0].requestedAt - submitStartedAt).toBeGreaterThanOrEqual(0)
+  expect(watchRequests[0].requestedAt - submitStartedAt).toBeLessThanOrEqual(firstWatchRequestMaxDelayMs)
   for (let index = 1; index < watchRequests.length; index += 1) {
     const spacingMs = watchRequests[index].requestedAt - watchRequests[index - 1].requestedAt
-    expect(spacingMs).toBeGreaterThanOrEqual(watchRequestDelayTolerance.min)
-    expect(spacingMs).toBeLessThanOrEqual(watchRequestDelayTolerance.max)
+    expect(spacingMs).toBeGreaterThanOrEqual(watchRequestSpacingToleranceMs.min)
+    expect(spacingMs).toBeLessThanOrEqual(watchRequestSpacingToleranceMs.max)
   }
 
   const expectedDurations = new Map([
@@ -230,6 +261,7 @@ test('gets learning first, then sends watch requests for each qualifying activit
 })
 
 test('shows multi-send summary and detail rows for mixed watch results', async ({ page }) => {
+  test.setTimeout(45_000)
   await page.goto('/')
 
   await page.route('**/class/*/learning', async (route) => {
@@ -297,7 +329,9 @@ test('shows multi-send summary and detail rows for mixed watch results', async (
   await page.getByPlaceholder('貼上使用者自己的 Token').fill('test-token-value')
   await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
 
-  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible({
+    timeout: WATCH_SUBMISSION_TIMEOUT_MS,
+  })
   await expect(page.getByText('總筆數 3 筆｜成功 1 筆｜失敗 2 筆')).toBeVisible()
   await expect(page.getByText('部分 watch request 失敗，請查看下方回應明細。')).toBeVisible()
   await expect(page.locator('.message.error')).toHaveCount(0)
@@ -310,6 +344,7 @@ test('shows multi-send summary and detail rows for mixed watch results', async (
 })
 
 test('shows all-failure summary as multi-send info and keeps watch detail rows', async ({ page }) => {
+  test.setTimeout(45_000)
   await page.goto('/')
 
   await page.route('**/class/*/learning', async (route) => {
@@ -351,7 +386,9 @@ test('shows all-failure summary as multi-send info and keeps watch detail rows',
   await page.getByPlaceholder('貼上使用者自己的 Token').fill('test-token-value')
   await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
 
-  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '多筆發出資訊' })).toBeVisible({
+    timeout: WATCH_SUBMISSION_TIMEOUT_MS,
+  })
   await expect(page.getByText('總筆數 2 筆｜成功 0 筆｜失敗 2 筆')).toBeVisible()
   await expect(page.getByText('全部 watch request 皆失敗，請查看下方回應明細。')).toBeVisible()
   await expect(page.locator('.message.error')).toHaveCount(0)
