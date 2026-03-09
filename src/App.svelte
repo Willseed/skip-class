@@ -21,7 +21,6 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
     activityId: string;
     activityName: string;
     duration: number;
-    endpoint: string;
     status: number | null;
     body: string;
     ok: boolean;
@@ -286,11 +285,10 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
               activityId: activity.id,
               activityName: activity.name,
               duration: activity.duration,
-              endpoint: startEndpoint,
               status: startResponseStatus,
               body: startResponseBody,
               ok: false,
-              error: `start request 失敗（HTTP ${startResponseStatus}），已略過 watch。start URL：${startEndpoint}`,
+              error: `start request 失敗（HTTP ${startResponseStatus}），已略過 watch。`,
             });
             continue;
           }
@@ -299,11 +297,10 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
             activityId: activity.id,
             activityName: activity.name,
             duration: activity.duration,
-            endpoint: startEndpoint,
             status: startResponseStatus,
             body: startResponseBody,
             ok: false,
-            error: `start request 發生錯誤，已略過 watch。start URL：${startEndpoint}；${error instanceof Error ? error.message : '未知錯誤'}`,
+            error: `start request 發生錯誤，已略過 watch。${error instanceof Error ? error.message : '未知錯誤'}`,
           });
           continue;
         }
@@ -322,7 +319,6 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
             activityId: activity.id,
             activityName: activity.name,
             duration: activity.duration,
-            endpoint: watchEndpoint,
             status: response.status,
             body: responseText,
             ok: response.ok,
@@ -333,7 +329,6 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
             activityId: activity.id,
             activityName: activity.name,
             duration: activity.duration,
-            endpoint: watchEndpoint,
             status: null,
             body: '',
             ok: false,
@@ -476,7 +471,6 @@ import type { FormValues, FieldErrors, ValidationResult } from './modules/valida
             <p class="watch-meta">
               duration: {result.duration} / {result.status === null ? '未取得 HTTP 狀態' : `HTTP ${result.status}`}
             </p>
-            <p class="watch-meta">URL：{result.endpoint}</p>
             {#if result.error}
               <p class="watch-meta watch-error">錯誤：{result.error}</p>
             {/if}
