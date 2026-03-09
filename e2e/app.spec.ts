@@ -471,15 +471,13 @@ test('attributes start failure rows to start endpoint and skips watch for that a
 
   const failedStartRow = page.locator('.watch-result', { hasText: '活動 #901 - 影片甲' })
   await expect(failedStartRow).toContainText('HTTP 500')
-  await expect(failedStartRow).toContainText('URL：https://example.invalid/class/735/learning-activity/901/start')
   await expect(failedStartRow).toContainText('"message":"start failed"')
-  await expect(failedStartRow).toContainText(
-    'start request 失敗（HTTP 500），已略過 watch。start URL：https://example.invalid/class/735/learning-activity/901/start',
-  )
+  await expect(failedStartRow).toContainText('start request 失敗（HTTP 500），已略過 watch。')
+  await expect(failedStartRow).not.toContainText('example.invalid')
 
   const successWatchRow = page.locator('.watch-result', { hasText: '活動 #902 - 影片乙' })
   await expect(successWatchRow).toContainText('HTTP 200')
-  await expect(successWatchRow).toContainText('URL：https://example.invalid/class/735/learning-activity/902/watch')
+  await expect(successWatchRow).not.toContainText('example.invalid')
 
   expect(watchRequests).toHaveLength(1)
   expect(watchRequests[0]).toEqual({
