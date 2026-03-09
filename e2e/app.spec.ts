@@ -88,9 +88,12 @@ test('gets learning first, then sends watch requests for each qualifying activit
     []
   let activeWatchRequests = 0
   let maxConcurrentWatchRequests = 0
-  const firstWatchRequestMaxDelayMs = 3_000
-  const watchRequestSpacingToleranceMs = { min: 4_900, max: 11_500 }
+  const firstWatchRequestMaxDelayMs = 2_000
   const mockedWatchResponseDelayMs = 200
+  const watchRequestSpacingToleranceMs = {
+    min: mockedWatchResponseDelayMs + 2_900,
+    max: mockedWatchResponseDelayMs + 5_700,
+  }
 
   await page.route('**/class/*/learning', async (route) => {
     const request = route.request()
@@ -249,14 +252,9 @@ test('gets learning first, then sends watch requests for each qualifying activit
       played?: unknown
       learning_time?: unknown
     }
-    expect(typeof payload.last_view_time).toBe('number')
-    expect(typeof payload.learning_time).toBe('number')
-    const passedSeconds = payload.last_view_time as number
-    expect(Number.isInteger(passedSeconds)).toBe(true)
-    expect(passedSeconds).toBeGreaterThanOrEqual(expectedDuration + 10)
-    expect(passedSeconds).toBeLessThanOrEqual(expectedDuration + 30)
-    expect(payload.learning_time).toBe(passedSeconds)
-    expect(payload.played).toEqual([[0, passedSeconds]])
+    expect(payload.last_view_time).toBe(expectedDuration)
+    expect(payload.learning_time).toBe(expectedDuration)
+    expect(payload.played).toEqual([[0, expectedDuration]])
   }
 })
 

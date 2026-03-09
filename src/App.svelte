@@ -45,10 +45,8 @@
       ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
       : ''
   const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true'
-  const WATCH_POST_INTERVAL_SECONDS_MIN = 5
-  const WATCH_POST_INTERVAL_SECONDS_MAX = 10
-  const WATCH_RANDOM_EXTRA_SECONDS_MIN = 10
-  const WATCH_RANDOM_EXTRA_SECONDS_MAX = 30
+  const WATCH_POST_INTERVAL_SECONDS_MIN = 3
+  const WATCH_POST_INTERVAL_SECONDS_MAX = 5
   const API_BASE_URL_ERROR =
     '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path'
 
@@ -107,20 +105,15 @@
     return Math.floor(Math.random() * (normalizedMax - normalizedMin + 1)) + normalizedMin
   }
 
-  const buildPayload = (duration: number, extraSeconds = 0): WatchPayload => {
+  const buildPayload = (duration: number): WatchPayload => {
     const safeDuration = Math.max(0, Math.floor(duration))
-    const safeExtraSeconds = Math.max(0, Math.floor(extraSeconds))
-    const passedSeconds = safeDuration + safeExtraSeconds
 
     return {
-      last_view_time: passedSeconds,
-      played: [[0, passedSeconds]],
-      learning_time: passedSeconds,
+      last_view_time: safeDuration,
+      played: [[0, safeDuration]],
+      learning_time: safeDuration,
     }
   }
-
-  const buildRandomizedPayload = (duration: number): WatchPayload =>
-    buildPayload(duration, getRandomIntInclusive(WATCH_RANDOM_EXTRA_SECONDS_MIN, WATCH_RANDOM_EXTRA_SECONDS_MAX))
 
   const escapeHtml = (value: string): string =>
     value
@@ -272,13 +265,7 @@
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${maskToken(authToken)}`,
               },
-              body: {
-                last_view_time: `${activity.duration} + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX})`,
-                played: [
-                  [0, `${activity.duration} + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX})`],
-                ],
-                learning_time: `${activity.duration} + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX})`,
-              },
+              body: buildPayload(activity.duration),
             },
           }))
         : [
@@ -293,9 +280,9 @@
                   Authorization: `Bearer ${maskToken(authToken)}`,
                 },
                 body: {
-                  last_view_time: `(material.duration + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX}))`,
-                  played: [[0, `(material.duration + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX}))`]],
-                  learning_time: `(material.duration + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX}))`,
+                  last_view_time: 'material.duration',
+                  played: [[0, 'material.duration']],
+                  learning_time: 'material.duration',
                 },
               },
             },
@@ -406,7 +393,7 @@
               'Content-Type': 'application/json',
               Authorization: `Bearer ${trimmedToken}`,
             },
-            body: JSON.stringify(buildRandomizedPayload(activity.duration)),
+            body: JSON.stringify(buildPayload(activity.duration)),
           })
 
           const responseText = await response.text()
