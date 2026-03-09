@@ -1,6 +1,6 @@
 # Watch API Web Tool
 
-以 Svelte + Vite 製作的表單工具，讓非技術使用者可直接填寫 watch API 參數並送出 POST JSON request。
+以 Svelte + Vite 製作的工具，讓使用者輸入課程 ID 後，先取得課程學習活動，再自動批次送出 watch API POST request。
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@
 
 | Variable | Required | Description |
 |---|---|---|
-| `VITE_API_BASE_URL` | Yes | API base URL for the watch endpoint（送出保護網址） |
+| `VITE_API_BASE_URL` | Yes | API base URL（會用於 `/class/{classId}/learning` 與後續 watch POST endpoint） |
 | `VITE_ENABLE_PREVIEW_PANES` | No（預設關閉） | 僅當值為嚴格字串 `true` 時啟用 request preview 與 sandbox iframe |
 
 請在 `.env.local` 設定環境變數（此檔案已在 `.gitignore`）：
@@ -25,6 +25,7 @@ VITE_ENABLE_PREVIEW_PANES=false
 若未設定 `VITE_API_BASE_URL`，畫面會顯示明確錯誤訊息，且送出按鈕會停用。
 `VITE_ENABLE_PREVIEW_PANES` 只有在值為 `true` 時才會顯示 preview panes，其餘值（包含空白、`false`）都視為關閉。
 以上為 Vite build-time 變數，變更後需重新啟動 `npm run dev` 或重新建置。
+本機請用 `.env.local` 管理；CI / 部署請透過 GitHub Actions Secrets 提供 `VITE_API_BASE_URL`，不要在程式碼或 workflow 內硬編碼真實 API 網址。
 
 ## Install & Run
 
@@ -37,10 +38,11 @@ npm run dev
 
 ## 給非技術使用者的操作方式
 
-1. 在 **API 路徑** 填入課程ID(`class`)與活動ID(`learning-activity`)。
-2. 在 **授權** 貼上你自己的 Bearer Token（系統不會預填）。
-3. 在 **Payload內容** 填入最後觀看時間(last_view_time)、播放起始時間(played_start)、播放結束時間(played_end)、學習時間(learning_time)（皆為 0 以上整數）。
-4. 按 **送出 watch request**，查看成功/錯誤訊息與伺服器回應。
+1. 在畫面輸入課程 ID（`classId`）與 Bearer Token。
+2. 按 **取得 learning 並送出 watch requests** 後，系統會先用 `VITE_API_BASE_URL` 組出 `GET /class/{classId}/learning` 取得課程資料。
+3. 系統會從回傳資料的 `data.units[].learning_activities[]` 中，挑出「有 `id` 且 `material.duration` 為數字」的活動，其他類型（例如無影片時長）會跳過。
+4. 針對上述每個活動 ID，系統會送出 `POST /class/{classId}/learning-activity/{activityId}/watch`，並顯示每筆成功/錯誤結果。
+5. 每筆 watch payload 由活動 `material.duration` 自動產生：`last_view_time = duration`、`played = [[0, duration]]`、`learning_time = duration`。
 
 ## Security Notes
 

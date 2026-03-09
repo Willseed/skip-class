@@ -1,15 +1,9 @@
 <script lang="ts">
   type FormValues = {
     classId: string
-    activityId: string
     authToken: string
-    lastViewTime: string
-    playedStart: string
-    playedEnd: string
-    learningTime: string
   }
 
-  type EndpointValues = Pick<FormValues, 'classId' | 'activityId'>
   type FieldErrors = Partial<Record<keyof FormValues, string>>
   type ValidationResult = {
     errors: string[]
@@ -22,7 +16,22 @@
     learning_time: number
   }
 
-  type PreviewNumber = number | '(未填寫)' | '(格式錯誤)'
+  type QualifiedActivity = {
+    id: string
+    name: string
+    duration: number
+  }
+
+  type WatchResponse = {
+    activityId: string
+    activityName: string
+    duration: number
+    endpoint: string
+    status: number | null
+    body: string
+    ok: boolean
+    error: string | null
+  }
 
   const API_BASE_URL =
     typeof import.meta.env.VITE_API_BASE_URL === 'string'
@@ -33,32 +42,41 @@
     '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path'
 
   let classId = ''
-  let activityId = ''
   let authToken = ''
-  let lastViewTime = ''
-  let playedStart = ''
-  let playedEnd = ''
-  let learningTime = ''
 
   let validationErrors: string[] = []
   let fieldErrors: FieldErrors = {}
   let hasFailedValidationAttempt = false
   let requestError = ''
   let requestSuccess = ''
-  let responseStatus: number | null = null
-  let responseBody = ''
+  let learningFetchStatus: number | null = null
+  let learningFetchBody = ''
+  let eligibleActivities: QualifiedActivity[] = []
+  let watchResponses: WatchResponse[] = []
   let isSubmitting = false
   let requestPreviewText: string
   let sandboxPreviewDoc: string
 
-  const buildEndpointUrl = (values: EndpointValues, withPlaceholders = false): string => {
-    const classIdPath = values.classId.trim()
-      ? encodeURIComponent(values.classId.trim())
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+
+  const buildLearningUrl = (classIdValue: string, withPlaceholders = false): string => {
+    const classIdPath = classIdValue.trim()
+      ? encodeURIComponent(classIdValue.trim())
       : withPlaceholders
         ? '{classId}'
         : ''
-    const activityIdPath = values.activityId.trim()
-      ? encodeURIComponent(values.activityId.trim())
+
+    return `${API_BASE_URL}/class/${classIdPath}/learning`
+  }
+
+  const buildWatchUrl = (classIdValue: string, activityIdValue: string, withPlaceholders = false): string => {
+    const classIdPath = classIdValue.trim()
+      ? encodeURIComponent(classIdValue.trim())
+      : withPlaceholders
+        ? '{classId}'
+        : ''
+    const activityIdPath = activityIdValue.trim()
+      ? encodeURIComponent(activityIdValue.trim())
       : withPlaceholders
         ? '{activityId}'
         : ''
@@ -66,20 +84,11 @@
     return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/watch`
   }
 
-  const buildPayload = (values: FormValues): WatchPayload => ({
-    last_view_time: Number(values.lastViewTime),
-    played: [[Number(values.playedStart), Number(values.playedEnd)]],
-    learning_time: Number(values.learningTime),
+  const buildPayload = (duration: number): WatchPayload => ({
+    last_view_time: duration,
+    played: [[0, duration]],
+    learning_time: duration,
   })
-
-  const toPreviewNumber = (value: string): PreviewNumber => {
-    if (value === '') {
-      return '(未填寫)'
-    }
-
-    const parsedValue = Number(value)
-    return Number.isFinite(parsedValue) ? parsedValue : '(格式錯誤)'
-  }
 
   const escapeHtml = (value: string): string =>
     value
@@ -131,51 +140,11 @@
       errors.push(message)
       setFieldError('classId', message)
     }
-    if (!values.activityId.trim()) {
-      const message = '請輸入活動ID(learning-activity)。'
-      errors.push(message)
-      setFieldError('activityId', message)
-    }
+
     if (!values.authToken.trim()) {
       const message = '請輸入授權 Token。'
       errors.push(message)
       setFieldError('authToken', message)
-    }
-
-    const numberFields: [keyof FormValues, string, string][] = [
-      ['lastViewTime', '最後觀看時間(last_view_time)', values.lastViewTime],
-      ['playedStart', '播放起始時間(played_start)', values.playedStart],
-      ['playedEnd', '播放結束時間(played_end)', values.playedEnd],
-      ['learningTime', '學習時間(learning_time)', values.learningTime],
-    ]
-
-    for (const [field, label, rawValue] of numberFields) {
-      if (rawValue === '') {
-        const message = `請輸入 ${label}。`
-        errors.push(message)
-        setFieldError(field, message)
-        continue
-      }
-      const parsedValue = Number(rawValue)
-      if (!Number.isInteger(parsedValue) || parsedValue < 0) {
-        const message = `${label} 需為 0 以上整數。`
-        errors.push(message)
-        setFieldError(field, message)
-      }
-    }
-
-    const start = Number(values.playedStart)
-    const end = Number(values.playedEnd)
-    const viewTime = Number(values.lastViewTime)
-    if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
-      const message = '播放結束時間(played_end)不可小於播放起始時間(played_start)。'
-      errors.push(message)
-      setFieldError('playedEnd', message)
-    }
-    if (Number.isFinite(viewTime) && Number.isFinite(end) && viewTime < end) {
-      const message = '最後觀看時間(last_view_time)需大於或等於播放結束時間(played_end)。'
-      errors.push(message)
-      setFieldError('lastViewTime', message)
     }
 
     return { errors, fieldErrors: nextFieldErrors }
@@ -188,20 +157,122 @@
     return result
   }
 
+  const extractQualifiedActivities = (payload: unknown): QualifiedActivity[] => {
+    if (!isRecord(payload)) {
+      return []
+    }
+
+    const data = payload.data
+    if (!isRecord(data)) {
+      return []
+    }
+
+    const units = data.units
+    if (!Array.isArray(units)) {
+      return []
+    }
+
+    const results: QualifiedActivity[] = []
+    const seenActivityIds: Record<string, true> = {}
+
+    for (const unit of units) {
+      if (!isRecord(unit)) {
+        continue
+      }
+
+      const learningActivities = unit.learning_activities
+      if (!Array.isArray(learningActivities)) {
+        continue
+      }
+
+      for (const learningActivity of learningActivities) {
+        if (!isRecord(learningActivity)) {
+          continue
+        }
+
+        const rawId = learningActivity.id
+        if (typeof rawId !== 'string' && typeof rawId !== 'number') {
+          continue
+        }
+
+        const activityId = String(rawId).trim()
+        if (!activityId || seenActivityIds[activityId]) {
+          continue
+        }
+
+        const material = learningActivity.material
+        if (!isRecord(material)) {
+          continue
+        }
+
+        const rawDuration = material.duration
+        if (typeof rawDuration !== 'number' || !Number.isFinite(rawDuration) || rawDuration < 0) {
+          continue
+        }
+
+        const duration = Math.floor(rawDuration)
+        const rawName = learningActivity.learning_activity_name
+        const activityName =
+          typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : `活動 ${activityId}`
+
+        seenActivityIds[activityId] = true
+        results.push({
+          id: activityId,
+          name: activityName,
+          duration,
+        })
+      }
+    }
+
+    return results
+  }
+
   $: if (ENABLE_PREVIEW_PANES) {
+    const postPreviewEntries =
+      eligibleActivities.length > 0
+        ? eligibleActivities.map((activity) => ({
+            activity_id: activity.id,
+            request: {
+              method: 'POST',
+              url: buildWatchUrl(classId, activity.id),
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${maskToken(authToken)}`,
+              },
+              body: buildPayload(activity.duration),
+            },
+          }))
+        : [
+            {
+              activity_id: '{learningActivityId}',
+              request: {
+                method: 'POST',
+                url: buildWatchUrl(classId, '', true),
+                headers: {
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${maskToken(authToken)}`,
+                },
+                body: {
+                  last_view_time: '(material.duration)',
+                  played: [[0, '(material.duration)']],
+                  learning_time: '(material.duration)',
+                },
+              },
+            },
+          ]
+
     const requestPreview = {
-      method: 'POST',
-      url: buildEndpointUrl({ classId, activityId }, true),
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${maskToken(authToken)}`,
+      step1_get_learning: {
+        method: 'GET',
+        url: buildLearningUrl(classId, true),
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${maskToken(authToken)}`,
+        },
       },
-      body: {
-        last_view_time: toPreviewNumber(lastViewTime),
-        played: [[toPreviewNumber(playedStart), toPreviewNumber(playedEnd)]],
-        learning_time: toPreviewNumber(learningTime),
-      },
+      step2_post_watch_requests: postPreviewEntries,
     }
 
     requestPreviewText = JSON.stringify(requestPreview, null, 2)
@@ -212,18 +283,20 @@
   }
 
   $: if (hasFailedValidationAttempt) {
-    applyValidation({ classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime })
+    applyValidation({ classId, authToken })
   }
 
   const submitRequest = async (): Promise<void> => {
-    const values: FormValues = { classId, activityId, authToken, lastViewTime, playedStart, playedEnd, learningTime }
+    const values: FormValues = { classId, authToken }
     const { errors } = applyValidation(values)
     hasFailedValidationAttempt = errors.length > 0
 
     requestError = ''
     requestSuccess = ''
-    responseStatus = null
-    responseBody = ''
+    learningFetchStatus = null
+    learningFetchBody = ''
+    eligibleActivities = []
+    watchResponses = []
 
     if (!API_BASE_URL) {
       requestError = API_BASE_URL_ERROR
@@ -236,23 +309,93 @@
 
     isSubmitting = true
     try {
-      const response = await fetch(buildEndpointUrl(values), {
-        method: 'POST',
+      const trimmedClassId = values.classId.trim()
+      const trimmedToken = values.authToken.trim()
+
+      const learningResponse = await fetch(buildLearningUrl(trimmedClassId), {
+        method: 'GET',
         headers: {
           Accept: 'application/json',
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${values.authToken.trim()}`,
+          Authorization: `Bearer ${trimmedToken}`,
         },
-        body: JSON.stringify(buildPayload(values)),
       })
 
-      responseStatus = response.status
-      responseBody = await response.text()
+      learningFetchStatus = learningResponse.status
+      learningFetchBody = await learningResponse.text()
 
-      if (response.ok) {
-        requestSuccess = '送出成功，伺服器已接收 watch 資料。'
+      if (!learningResponse.ok) {
+        requestError = `取得 learning 資料失敗（HTTP ${learningResponse.status}）。請確認課程ID與 Token。`
+        return
+      }
+
+      let learningPayload: unknown
+      try {
+        learningPayload = learningFetchBody ? JSON.parse(learningFetchBody) : null
+      } catch {
+        requestError = '取得 learning 資料成功，但回應不是有效 JSON。'
+        return
+      }
+
+      const activities = extractQualifiedActivities(learningPayload)
+      eligibleActivities = activities
+
+      if (activities.length === 0) {
+        requestError = '找不到可送出的 learning activity：需具備 material 且 material.duration 為數字。'
+        return
+      }
+
+      const results = await Promise.all(
+        activities.map(async (activity): Promise<WatchResponse> => {
+          const endpoint = buildWatchUrl(trimmedClassId, activity.id)
+
+          try {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${trimmedToken}`,
+              },
+              body: JSON.stringify(buildPayload(activity.duration)),
+            })
+
+            const responseText = await response.text()
+            return {
+              activityId: activity.id,
+              activityName: activity.name,
+              duration: activity.duration,
+              endpoint,
+              status: response.status,
+              body: responseText,
+              ok: response.ok,
+              error: null,
+            }
+          } catch (error: unknown) {
+            return {
+              activityId: activity.id,
+              activityName: activity.name,
+              duration: activity.duration,
+              endpoint,
+              status: null,
+              body: '',
+              ok: false,
+              error: error instanceof Error ? error.message : '未知錯誤',
+            }
+          }
+        }),
+      )
+
+      watchResponses = results
+
+      const successCount = results.filter((result) => result.ok).length
+      const failedCount = results.length - successCount
+
+      if (failedCount === 0) {
+        requestSuccess = `已完成送出，共 ${successCount} 筆 watch request 全部成功。`
+      } else if (successCount === 0) {
+        requestError = `共 ${results.length} 筆 watch request 全部失敗，請檢查回應內容。`
       } else {
-        requestError = `送出失敗（HTTP ${response.status}）。請確認 Token 和輸入值。`
+        requestError = `共 ${results.length} 筆 watch request，成功 ${successCount} 筆、失敗 ${failedCount} 筆。`
       }
     } catch (error: unknown) {
       requestError = `送出失敗：${error instanceof Error ? error.message : '未知錯誤'}`
@@ -266,7 +409,7 @@
   <section class="tool-card">
     <h1>Watch API 填寫工具</h1>
     <p class="description">
-      依照欄位填寫資料後按「送出」，工具會自動組出 API request。Token 請自行貼上，不會預設任何密鑰。
+      輸入課程ID與 Token 後按「送出」，工具會先取得 learning 清單，再依符合條件的 learning activity 自動逐筆送出 watch request。
     </p>
     {#if !API_BASE_URL}
       <div class="message error">{API_BASE_URL_ERROR}</div>
@@ -275,22 +418,13 @@
     <form on:submit|preventDefault={submitRequest} class="form-block">
       <fieldset>
         <legend>1. API 路徑</legend>
-        <div class="grid-fields">
-          <label>
-            課程ID(class)
-            <input bind:value={classId} placeholder="例如 594" autocomplete="off" class={fieldErrors.classId ? 'input-error' : ''} />
-            {#if fieldErrors.classId}
-              <span class="field-error">{fieldErrors.classId}</span>
-            {/if}
-          </label>
-          <label>
-            活動ID(learning-activity)
-            <input bind:value={activityId} placeholder="例如 2241" autocomplete="off" class={fieldErrors.activityId ? 'input-error' : ''} />
-            {#if fieldErrors.activityId}
-              <span class="field-error">{fieldErrors.activityId}</span>
-            {/if}
-          </label>
-        </div>
+        <label>
+          課程ID(class)
+          <input bind:value={classId} placeholder="例如 594" autocomplete="off" class={fieldErrors.classId ? 'input-error' : ''} />
+          {#if fieldErrors.classId}
+            <span class="field-error">{fieldErrors.classId}</span>
+          {/if}
+        </label>
       </fieldset>
 
       <fieldset>
@@ -304,40 +438,6 @@
         </label>
       </fieldset>
 
-      <fieldset>
-        <legend>3. Payload內容</legend>
-        <div class="grid-fields">
-          <label>
-            最後觀看時間(last_view_time)
-            <input type="number" min="0" step="1" bind:value={lastViewTime} placeholder="例如 3130" class={fieldErrors.lastViewTime ? 'input-error' : ''} />
-            {#if fieldErrors.lastViewTime}
-              <span class="field-error">{fieldErrors.lastViewTime}</span>
-            {/if}
-          </label>
-          <label>
-            播放起始時間(played_start)
-            <input type="number" min="0" step="1" bind:value={playedStart} placeholder="例如 3100" class={fieldErrors.playedStart ? 'input-error' : ''} />
-            {#if fieldErrors.playedStart}
-              <span class="field-error">{fieldErrors.playedStart}</span>
-            {/if}
-          </label>
-          <label>
-            播放結束時間(played_end)
-            <input type="number" min="0" step="1" bind:value={playedEnd} placeholder="例如 3130" class={fieldErrors.playedEnd ? 'input-error' : ''} />
-            {#if fieldErrors.playedEnd}
-              <span class="field-error">{fieldErrors.playedEnd}</span>
-            {/if}
-          </label>
-          <label>
-            學習時間(learning_time)
-            <input type="number" min="0" step="1" bind:value={learningTime} placeholder="例如 30" class={fieldErrors.learningTime ? 'input-error' : ''} />
-            {#if fieldErrors.learningTime}
-              <span class="field-error">{fieldErrors.learningTime}</span>
-            {/if}
-          </label>
-        </div>
-      </fieldset>
-
       {#if requestSuccess}
         <div class="message success">{requestSuccess}</div>
       {/if}
@@ -346,7 +446,7 @@
       {/if}
 
       <button type="submit" disabled={isSubmitting || !API_BASE_URL}>
-        {isSubmitting ? '送出中…' : '送出 watch request'}
+        {isSubmitting ? '送出中…' : '取得 learning 並送出 watch requests'}
       </button>
     </form>
 
@@ -361,10 +461,46 @@
       </section>
     {/if}
 
-    {#if responseStatus !== null}
+    {#if eligibleActivities.length > 0}
+      <section class="activity-block">
+        <h2>符合條件的 learning activity（{eligibleActivities.length}）</h2>
+        <ul class="activity-list">
+          {#each eligibleActivities as activity (activity.id)}
+            <li>
+              <strong>#{activity.id}</strong>
+              <span>{activity.name}</span>
+              <span>duration: {activity.duration}</span>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    {#if learningFetchStatus !== null}
       <section class="response-block">
-        <h2>伺服器回應（HTTP {responseStatus}）</h2>
-        <pre>{responseBody || '(空白回應)'}</pre>
+        <h2>Learning API 回應（HTTP {learningFetchStatus}）</h2>
+        <pre>{learningFetchBody || '(空白回應)'}</pre>
+      </section>
+    {/if}
+
+    {#if watchResponses.length > 0}
+      <section class="response-block">
+        <h2>Watch API 回應（共 {watchResponses.length} 筆）</h2>
+        {#each watchResponses as result (result.activityId)}
+          <article class="watch-result" class:watch-result-success={result.ok} class:watch-result-error={!result.ok}>
+            <h3>
+              活動 #{result.activityId} - {result.activityName}
+            </h3>
+            <p class="watch-meta">
+              duration: {result.duration} / {result.status === null ? '未取得 HTTP 狀態' : `HTTP ${result.status}`}
+            </p>
+            <p class="watch-meta">URL：{result.endpoint}</p>
+            {#if result.error}
+              <p class="watch-meta watch-error">錯誤：{result.error}</p>
+            {/if}
+            <pre>{result.body || '(空白回應)'}</pre>
+          </article>
+        {/each}
       </section>
     {/if}
   </section>
@@ -379,7 +515,8 @@
   }
 
   h1,
-  h2 {
+  h2,
+  h3 {
     margin: 0;
   }
 
@@ -400,6 +537,7 @@
 
   .form-block,
   .preview-block,
+  .activity-block,
   .response-block {
     margin-top: 1.25rem;
   }
@@ -453,12 +591,6 @@
     outline: 2px solid #2563eb;
     outline-offset: 1px;
     border-color: #2563eb;
-  }
-
-  .grid-fields {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.9rem;
   }
 
   button {
@@ -529,5 +661,47 @@
     border: 1px solid #cbd5e1;
     border-radius: 0.75rem;
     background: #fff;
+  }
+
+  .activity-list {
+    margin: 0.75rem 0 0;
+    padding-left: 1.2rem;
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .activity-list li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .watch-result {
+    margin-top: 0.85rem;
+    padding: 0.8rem;
+    border-radius: 0.75rem;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+  }
+
+  .watch-result-success {
+    border-color: #86efac;
+    background: #f0fdf4;
+  }
+
+  .watch-result-error {
+    border-color: #fca5a5;
+    background: #fef2f2;
+  }
+
+  .watch-meta {
+    margin: 0.45rem 0 0;
+    font-size: 0.9rem;
+    color: #334155;
+  }
+
+  .watch-error {
+    color: #b91c1c;
+    font-weight: 600;
   }
 </style>
