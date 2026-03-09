@@ -45,6 +45,9 @@
       ? import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '')
       : ''
   const ENABLE_PREVIEW_PANES = import.meta.env.VITE_ENABLE_PREVIEW_PANES === 'true'
+  const WATCH_REQUEST_DELAY_MS = 1000
+  const WATCH_RANDOM_EXTRA_SECONDS_MIN = 10
+  const WATCH_RANDOM_EXTRA_SECONDS_MAX = 30
   const API_BASE_URL_ERROR =
     '缺少設定：請在 .env.local 設定 VITE_API_BASE_URL（發送保護網址），例如 https://your-api-host.example.com/path'
 
@@ -92,11 +95,31 @@
     return `${API_BASE_URL}/class/${classIdPath}/learning-activity/${activityIdPath}/watch`
   }
 
-  const buildPayload = (duration: number): WatchPayload => ({
-    last_view_time: duration,
-    played: [[0, duration]],
-    learning_time: duration,
-  })
+  const wait = async (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms)
+    })
+
+  const getRandomIntInclusive = (min: number, max: number): number => {
+    const normalizedMin = Math.ceil(min)
+    const normalizedMax = Math.floor(max)
+    return Math.floor(Math.random() * (normalizedMax - normalizedMin + 1)) + normalizedMin
+  }
+
+  const buildPayload = (duration: number, extraSeconds = 0): WatchPayload => {
+    const safeDuration = Math.max(0, Math.floor(duration))
+    const safeExtraSeconds = Math.max(0, Math.floor(extraSeconds))
+    const passedSeconds = safeDuration + safeExtraSeconds
+
+    return {
+      last_view_time: passedSeconds,
+      played: [[0, passedSeconds]],
+      learning_time: passedSeconds,
+    }
+  }
+
+  const buildRandomizedPayload = (duration: number): WatchPayload =>
+    buildPayload(duration, getRandomIntInclusive(WATCH_RANDOM_EXTRA_SECONDS_MIN, WATCH_RANDOM_EXTRA_SECONDS_MAX))
 
   const escapeHtml = (value: string): string =>
     value
@@ -248,7 +271,13 @@
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${maskToken(authToken)}`,
               },
-              body: buildPayload(activity.duration),
+              body: {
+                last_view_time: `${activity.duration} + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX})`,
+                played: [
+                  [0, `${activity.duration} + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX})`],
+                ],
+                learning_time: `${activity.duration} + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX})`,
+              },
             },
           }))
         : [
@@ -263,9 +292,9 @@
                   Authorization: `Bearer ${maskToken(authToken)}`,
                 },
                 body: {
-                  last_view_time: '(material.duration)',
-                  played: [[0, '(material.duration)']],
-                  learning_time: '(material.duration)',
+                  last_view_time: `(material.duration + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX}))`,
+                  played: [[0, `(material.duration + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX}))`]],
+                  learning_time: `(material.duration + random(${WATCH_RANDOM_EXTRA_SECONDS_MIN}~${WATCH_RANDOM_EXTRA_SECONDS_MAX}))`,
                 },
               },
             },
@@ -353,46 +382,46 @@
         return
       }
 
-      const results = await Promise.all(
-        activities.map(async (activity): Promise<WatchResponse> => {
-          const endpoint = buildWatchUrl(trimmedClassId, activity.id)
+      const results: WatchResponse[] = []
+      for (const activity of activities) {
+        const endpoint = buildWatchUrl(trimmedClassId, activity.id)
+        await wait(WATCH_REQUEST_DELAY_MS)
 
-          try {
-            const response = await fetch(endpoint, {
-              method: 'POST',
-              headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${trimmedToken}`,
-              },
-              body: JSON.stringify(buildPayload(activity.duration)),
-            })
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${trimmedToken}`,
+            },
+            body: JSON.stringify(buildRandomizedPayload(activity.duration)),
+          })
 
-            const responseText = await response.text()
-            return {
-              activityId: activity.id,
-              activityName: activity.name,
-              duration: activity.duration,
-              endpoint,
-              status: response.status,
-              body: responseText,
-              ok: response.ok,
-              error: null,
-            }
-          } catch (error: unknown) {
-            return {
-              activityId: activity.id,
-              activityName: activity.name,
-              duration: activity.duration,
-              endpoint,
-              status: null,
-              body: '',
-              ok: false,
-              error: error instanceof Error ? error.message : '未知錯誤',
-            }
-          }
-        }),
-      )
+          const responseText = await response.text()
+          results.push({
+            activityId: activity.id,
+            activityName: activity.name,
+            duration: activity.duration,
+            endpoint,
+            status: response.status,
+            body: responseText,
+            ok: response.ok,
+            error: null,
+          })
+        } catch (error: unknown) {
+          results.push({
+            activityId: activity.id,
+            activityName: activity.name,
+            duration: activity.duration,
+            endpoint,
+            status: null,
+            body: '',
+            ok: false,
+            error: error instanceof Error ? error.message : '未知錯誤',
+          })
+        }
+      }
 
       watchResponses = results
 

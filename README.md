@@ -41,8 +41,8 @@ npm run dev
 1. 在畫面輸入課程 ID（`classId`）與 Bearer Token。
 2. 按 **取得 learning 並送出 watch requests** 後，系統會先用 `VITE_API_BASE_URL` 組出 `GET /class/{classId}/learning` 取得課程資料。
 3. 系統會從回傳資料的 `data.units[].learning_activities[]` 中，挑出「有 `id` 且 `material.duration` 為數字」的活動，其他類型（例如無影片時長）會跳過。
-4. 針對上述每個活動 ID，系統會送出 `POST /class/{classId}/learning-activity/{activityId}/watch`，並顯示每筆成功/錯誤結果。
-5. 每筆 watch payload 由活動 `material.duration` 自動產生：`last_view_time = duration`、`played = [[0, duration]]`、`learning_time = duration`。
+4. 針對上述每個活動 ID，系統會以 async/await 逐筆送出 `POST /class/{classId}/learning-activity/{activityId}/watch`（每筆送出前固定延遲 1 秒），並顯示每筆成功/錯誤結果。
+5. 每筆 watch payload 由活動 `material.duration` 加上隨機 `10~30` 秒後產生：`last_view_time = duration + random(10~30)`、`played = [[0, duration + random(10~30)]]`、`learning_time = duration + random(10~30)`。
 
 ## Security Notes
 

@@ -81,7 +81,12 @@ test('gets learning first, then sends watch requests for each qualifying activit
 
   const requestMethods: string[] = []
   const learningRequests: Array<{ url: string; authorization: string | undefined }> = []
-  const watchRequests: Array<{ url: string; authorization: string | undefined; body: unknown }> = []
+  const watchRequests: Array<{ url: string; authorization: string | undefined; body: unknown; requestedAt: number }> =
+    []
+  let activeWatchRequests = 0
+  let maxConcurrentWatchRequests = 0
+  const watchRequestDelayTolerance = { min: 850, max: 2600 }
+  const mockedWatchResponseDelayMs = 200
 
   await page.route('**/class/*/learning', async (route) => {
     const request = route.request()
@@ -137,22 +142,31 @@ test('gets learning first, then sends watch requests for each qualifying activit
 
   await page.route('**/class/*/learning-activity/*/watch', async (route) => {
     const request = route.request()
+    activeWatchRequests += 1
+    maxConcurrentWatchRequests = Math.max(maxConcurrentWatchRequests, activeWatchRequests)
     requestMethods.push(request.method())
     watchRequests.push({
       url: request.url(),
       authorization: request.headers().authorization,
       body: JSON.parse(request.postData() ?? '{}'),
+      requestedAt: Date.now(),
     })
 
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ status: true }),
-    })
+    try {
+      await page.waitForTimeout(mockedWatchResponseDelayMs)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: true }),
+      })
+    } finally {
+      activeWatchRequests -= 1
+    }
   })
 
   await page.getByPlaceholder('例如 594').fill('735')
   await page.getByPlaceholder('貼上使用者自己的 Token').fill('test-token-value')
+  const submitStartedAt = Date.now()
   await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
 
   await expect(page.getByText('已完成送出，共 3 筆 watch request 全部成功。')).toBeVisible()
@@ -168,6 +182,15 @@ test('gets learning first, then sends watch requests for each qualifying activit
   expect(requestMethods[0]).toBe('GET')
   expect(requestMethods.slice(1).every((method) => method === 'POST')).toBe(true)
   expect(watchRequests).toHaveLength(3)
+  expect(maxConcurrentWatchRequests).toBe(1)
+
+  expect(watchRequests[0].requestedAt - submitStartedAt).toBeGreaterThanOrEqual(watchRequestDelayTolerance.min)
+  expect(watchRequests[0].requestedAt - submitStartedAt).toBeLessThanOrEqual(watchRequestDelayTolerance.max)
+  for (let index = 1; index < watchRequests.length; index += 1) {
+    const spacingMs = watchRequests[index].requestedAt - watchRequests[index - 1].requestedAt
+    expect(spacingMs).toBeGreaterThanOrEqual(watchRequestDelayTolerance.min)
+    expect(spacingMs).toBeLessThanOrEqual(watchRequestDelayTolerance.max)
+  }
 
   const expectedDurations = new Map([
     ['671', 363],
@@ -184,11 +207,25 @@ test('gets learning first, then sends watch requests for each qualifying activit
 
     expect(expectedDurations.has(activityId)).toBe(true)
     expect(request.authorization).toBe('Bearer test-token-value')
-    expect(request.body).toEqual({
-      last_view_time: expectedDurations.get(activityId),
-      played: [[0, expectedDurations.get(activityId)]],
-      learning_time: expectedDurations.get(activityId),
-    })
+    const expectedDuration = expectedDurations.get(activityId)
+    expect(expectedDuration).toBeDefined()
+    if (expectedDuration === undefined) {
+      continue
+    }
+
+    const payload = request.body as {
+      last_view_time?: unknown
+      played?: unknown
+      learning_time?: unknown
+    }
+    expect(typeof payload.last_view_time).toBe('number')
+    expect(typeof payload.learning_time).toBe('number')
+    const passedSeconds = payload.last_view_time as number
+    expect(Number.isInteger(passedSeconds)).toBe(true)
+    expect(passedSeconds).toBeGreaterThanOrEqual(expectedDuration + 10)
+    expect(passedSeconds).toBeLessThanOrEqual(expectedDuration + 30)
+    expect(payload.learning_time).toBe(passedSeconds)
+    expect(payload.played).toEqual([[0, passedSeconds]])
   }
 })
 
