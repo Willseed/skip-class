@@ -238,6 +238,7 @@ test('gets learning first, then sends watch requests for each qualifying activit
   await expect(page.getByText('總筆數 3 筆｜成功 3 筆｜失敗 0 筆')).toBeVisible()
   await expect(page.getByText('所有 watch request 已完成且皆成功。')).toBeVisible()
   await expect(page.getByRole('heading', { name: '符合條件的 learning activity（3）' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Learning API 回應/ })).toHaveCount(0)
   expect(learningRequests).toHaveLength(1)
   expect(learningRequests[0]).toEqual({
     url: 'https://example.invalid/class/735/learning',
@@ -299,6 +300,90 @@ test('gets learning first, then sends watch requests for each qualifying activit
     expect(payload.learning_time).toBe(expectedDuration)
     expect(payload.played).toEqual([[0, expectedDuration]])
   }
+})
+
+test('normalizes Bearer-prefixed token for learning and watch authorization headers', async ({ page }) => {
+  test.setTimeout(45_000)
+  await page.goto('/')
+
+  const learningAuthHeaders: Array<string | undefined> = []
+  const startAuthHeaders: Array<string | undefined> = []
+  const watchAuthHeaders: Array<string | undefined> = []
+
+  await page.route('**/class/*/learning', async (route) => {
+    learningAuthHeaders.push(route.request().headers().authorization)
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          units: [
+            {
+              learning_activities: [
+                {
+                  id: 1001,
+                  learning_activity_name: '影片一',
+                  material: { duration: 120 },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+  })
+
+  await page.route('**/class/*/learning-activity/*/start', async (route) => {
+    startAuthHeaders.push(route.request().headers().authorization)
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: true }),
+    })
+  })
+
+  await page.route('**/class/*/learning-activity/*/watch', async (route) => {
+    watchAuthHeaders.push(route.request().headers().authorization)
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: true }),
+    })
+  })
+
+  await page.getByPlaceholder('例如 594').fill('735')
+  await page.getByPlaceholder('貼上使用者自己的 Token').fill('Bearer test-token-value')
+  await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
+
+  await expect(page.getByText('已完成送出，共 1 筆 watch request 全部成功。')).toBeVisible({
+    timeout: WATCH_SUBMISSION_TIMEOUT_MS,
+  })
+
+  expect(learningAuthHeaders).toEqual(['Bearer test-token-value'])
+  expect(startAuthHeaders).toEqual(['Bearer test-token-value'])
+  expect(watchAuthHeaders).toEqual(['Bearer test-token-value'])
+})
+
+test('blocks submission when token input is only Bearer prefix', async ({ page }) => {
+  await page.goto('/')
+
+  let learningRequestCount = 0
+  await page.route('**/class/*/learning', async (route) => {
+    learningRequestCount += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { units: [] } }),
+    })
+  })
+
+  await page.getByPlaceholder('例如 594').fill('735')
+  await page.getByPlaceholder('貼上使用者自己的 Token').fill('Bearer ')
+  await page.getByRole('button', { name: '取得 learning 並送出 watch requests' }).click()
+
+  await expect(page.getByText('授權 Token 格式錯誤：請輸入 raw token 或 Bearer <token>。')).toBeVisible()
+  await page.waitForTimeout(300)
+  expect(learningRequestCount).toBe(0)
 })
 
 test('shows multi-send summary and detail rows for mixed watch results', async ({ page }) => {

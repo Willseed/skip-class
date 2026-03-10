@@ -1,3 +1,5 @@
+import { INVALID_AUTH_TOKEN_MESSAGE, normalizeAuthToken } from './auth';
+
 // Validation logic
 export type FormValues = {
   classId: string;
@@ -27,6 +29,9 @@ export const validateForm = (values: FormValues): ValidationResult => {
     const message = '請輸入授權 Token。';
     errors.push(message);
     setFieldError('authToken', message);
+  } else if (!normalizeAuthToken(values.authToken)) {
+    errors.push(INVALID_AUTH_TOKEN_MESSAGE);
+    setFieldError('authToken', INVALID_AUTH_TOKEN_MESSAGE);
   }
   return { errors, fieldErrors: nextFieldErrors };
 };

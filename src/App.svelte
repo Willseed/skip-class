@@ -1,5 +1,6 @@
 <script lang="ts">
   import { buildLearningUrl } from './modules/api';
+  import { buildAuthorizationHeader } from './modules/auth';
   import { validateForm } from './modules/validation';
   import type { FieldErrors, FormValues, ValidationResult } from './modules/validation';
   import { createPreviewDocument } from './modules/preview';
@@ -28,8 +29,6 @@
   let hasFailedValidationAttempt = false;
   let requestError = '';
   let requestSuccess = '';
-  let learningFetchStatus: number | null = null;
-  let learningFetchBody = '';
   let eligibleActivities: QualifiedActivity[] = [];
   let watchResponses: WatchResponse[] = [];
   let watchBatchSummary: WatchBatchSummary | null = null;
@@ -72,8 +71,6 @@
     hasFailedValidationAttempt = errors.length > 0;
     requestError = '';
     requestSuccess = '';
-    learningFetchStatus = null;
-    learningFetchBody = '';
     eligibleActivities = [];
     watchResponses = [];
     watchBatchSummary = null;
@@ -91,17 +88,15 @@
 
     try {
       const trimmedClassId = values.classId.trim();
-      const trimmedToken = values.authToken.trim();
+      const authorizationHeader = buildAuthorizationHeader(values.authToken);
       const learningResponse = await fetch(buildLearningUrl(API_BASE_URL, trimmedClassId), {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          Authorization: `Bearer ${trimmedToken}`,
+          Authorization: authorizationHeader,
         },
       });
-
-      learningFetchStatus = learningResponse.status;
-      learningFetchBody = await learningResponse.text();
+      const learningResponseBody = await learningResponse.text();
 
       if (!learningResponse.ok) {
         requestError = `取得 learning 資料失敗（HTTP ${learningResponse.status}）。請確認課程ID與 Token。`;
@@ -110,7 +105,7 @@
 
       let learningPayload: unknown;
       try {
-        learningPayload = learningFetchBody ? JSON.parse(learningFetchBody) : null;
+        learningPayload = learningResponseBody ? JSON.parse(learningResponseBody) : null;
       } catch {
         requestError = '取得 learning 資料成功，但回應不是有效 JSON。';
         return;
@@ -127,7 +122,7 @@
       const batchResult = await runWatchBatch({
         apiBaseUrl: API_BASE_URL,
         classId: trimmedClassId,
-        authToken: trimmedToken,
+        authToken: values.authToken,
         activities,
         intervalMinMs: WATCH_POST_INTERVAL_MS_MIN,
         intervalMaxMs: WATCH_POST_INTERVAL_MS_MAX,
@@ -220,13 +215,6 @@
             </li>
           {/each}
         </ul>
-      </section>
-    {/if}
-
-    {#if learningFetchStatus !== null}
-      <section class="response-block">
-        <h2>Learning API 回應（HTTP {learningFetchStatus}）</h2>
-        <pre>{learningFetchBody || '(空白回應)'}</pre>
       </section>
     {/if}
 

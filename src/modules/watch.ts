@@ -1,4 +1,5 @@
 import { buildLearningUrl, buildStartUrl, buildWatchUrl } from './api';
+import { buildAuthorizationHeader, normalizeAuthToken } from './auth';
 import { maskToken } from './preview';
 import { getRandomIntInclusive, wait } from '../utils/helpers';
 
@@ -120,6 +121,7 @@ export const buildRequestPreviewData = ({
   authToken,
   eligibleActivities,
 }: BuildRequestPreviewDataOptions) => {
+  const maskedAuthorization = `Bearer ${maskToken(normalizeAuthToken(authToken))}`;
   const startAndWatchPreviewEntries =
     eligibleActivities.length > 0
       ? eligibleActivities.map((activity) => ({
@@ -129,7 +131,7 @@ export const buildRequestPreviewData = ({
             url: buildStartUrl(apiBaseUrl, classId, activity.id),
             headers: {
               Accept: 'application/json',
-              Authorization: `Bearer ${maskToken(authToken)}`,
+              Authorization: maskedAuthorization,
             },
           },
           step3_post_watch: {
@@ -138,7 +140,7 @@ export const buildRequestPreviewData = ({
             headers: {
               Accept: 'application/json',
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${maskToken(authToken)}`,
+              Authorization: maskedAuthorization,
             },
             body: buildPayload(activity.duration),
           },
@@ -151,7 +153,7 @@ export const buildRequestPreviewData = ({
               url: buildStartUrl(apiBaseUrl, classId, '', true),
               headers: {
                 Accept: 'application/json',
-                Authorization: `Bearer ${maskToken(authToken)}`,
+                Authorization: maskedAuthorization,
               },
             },
             step3_post_watch: {
@@ -160,7 +162,7 @@ export const buildRequestPreviewData = ({
               headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${maskToken(authToken)}`,
+                Authorization: maskedAuthorization,
               },
               body: {
                 last_view_time: 'material.duration',
@@ -177,7 +179,7 @@ export const buildRequestPreviewData = ({
       url: buildLearningUrl(apiBaseUrl, classId, true),
       headers: {
         Accept: 'application/json',
-        Authorization: `Bearer ${maskToken(authToken)}`,
+        Authorization: maskedAuthorization,
       },
     },
     step2_post_start_then_watch_requests: startAndWatchPreviewEntries,
@@ -214,6 +216,7 @@ export const runWatchBatch = async ({
   randomIntInclusiveFn = getRandomIntInclusive,
 }: RunWatchBatchOptions): Promise<WatchBatchResult> => {
   const results: WatchResponse[] = [];
+  const authorizationHeader = buildAuthorizationHeader(authToken);
 
   for (const [index, activity] of activities.entries()) {
     const startEndpoint = buildStartUrl(apiBaseUrl, classId, activity.id);
@@ -232,7 +235,7 @@ export const runWatchBatch = async ({
         method: 'POST',
         headers: {
           Accept: 'application/json',
-          Authorization: `Bearer ${authToken}`,
+          Authorization: authorizationHeader,
         },
       });
 
@@ -270,7 +273,7 @@ export const runWatchBatch = async ({
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
+          Authorization: authorizationHeader,
         },
         body: JSON.stringify(buildPayload(activity.duration)),
       });

@@ -38,7 +38,7 @@ npm run dev
 
 ## 給非技術使用者的操作方式
 
-1. 在畫面輸入課程 ID（`classId`）與 Bearer Token。
+1. 在畫面輸入課程 ID（`classId`）與授權 Token（可貼 raw token，或 `Bearer <token>`）。
 2. 按 **取得 learning 並送出 watch requests** 後，系統會先用 `VITE_API_BASE_URL` 組出 `GET /class/{classId}/learning` 取得課程資料。
 3. 系統會從回傳資料的 `data.units[].learning_activities[]` 中，挑出「有 `id` 且 `material.duration` 為數字」的活動，其他類型（例如無影片時長）會跳過。
 4. 針對上述每個活動 ID，系統會以 async/await 逐筆先送出 `POST /class/{classId}/learning-activity/{activityId}/start`，成功後再送出 `POST /class/{classId}/learning-activity/{activityId}/watch`。
